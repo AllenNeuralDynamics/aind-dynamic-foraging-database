@@ -1,0 +1,11 @@
+[flake8]
+extend-ignore = E203
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    build,
+    dist,
+    src/aind_dynamic_foraging_database/validate
+max-complexity = 10
+max-line-length = 100
