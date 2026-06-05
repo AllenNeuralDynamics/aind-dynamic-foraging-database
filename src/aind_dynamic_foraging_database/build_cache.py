@@ -62,7 +62,7 @@ class Config:
     random_seed: int = 42
     n_workers: Optional[int] = None  # worker processes; None -> CO_CPUS-1
     coalesce: bool = True  # merge each subject's sessions into one parquet file
-    co_cache: Optional[str] = None  # dev: cache the docDB discovery parquet here
+    co_cache: Optional[str] = None  # dev: cache the docDB discovery (pickle) here
 
     @property
     def is_s3(self) -> bool:
@@ -119,9 +119,12 @@ def build_sessions(cfg: Config):
 
 def _load_or_fetch_co_discovery(cfg: Config):
     """
-    Dev helper: if --co-cache is set, load the cached docDB discovery parquet (or
-    fetch once and save it). Returns None when no cache is configured, so
-    build_session_table fetches fresh.
+    Dev helper: if --co-cache is set, load the cached docDB discovery (or fetch once and
+    save it). Returns None when no cache is configured, so build_session_table fetches fresh.
+
+    Cached as a **pickle** (not parquet): the docDB result has list-valued columns such as
+    ``co_task`` that pyarrow can't serialize, and pickle round-trips the full DataFrame
+    unchanged so a cached run matches a fresh fetch.
     """
     if not cfg.co_cache:
         return None
@@ -129,16 +132,13 @@ def _load_or_fetch_co_discovery(cfg: Config):
 
     if os.path.exists(cfg.co_cache):
         print(f"  using cached docDB discovery: {cfg.co_cache}")
-        return pd.read_parquet(cfg.co_cache)
+        return pd.read_pickle(cfg.co_cache)
 
     from aind_dynamic_foraging_data_utils.code_ocean_utils import get_dynamic_foraging_assets
 
     print(f"  fetching docDB discovery, caching -> {cfg.co_cache}")
     co = get_dynamic_foraging_assets()
-    cols = ["name", "session_name", "location", "code_ocean_asset_id", "subject_id",
-            "co_task", "co_session_type", "curriculum_in_use", "stage_in_use",
-            "co_rig_id", "co_modality"]
-    co[[c for c in cols if c in co.columns]].to_parquet(cfg.co_cache)
+    co.to_pickle(cfg.co_cache)
     return co
 
 
@@ -250,7 +250,7 @@ def parse_args(argv=None) -> Config:
                    help="keep one parquet file per session instead of merging each "
                         "subject's sessions into a single sorted file (the default)")
     p.add_argument("--co-cache", default=None,
-                   help="dev: parquet path to cache the ~137s docDB discovery "
+                   help="dev: path to cache the ~137s docDB discovery "
                         "(loaded if present, else fetched once and saved)")
     args = p.parse_args(argv)
     return Config(

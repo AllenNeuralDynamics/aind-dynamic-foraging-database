@@ -40,7 +40,7 @@ python -m aind_dynamic_foraging_database.build_cache \
 python -m aind_dynamic_foraging_database.build_cache \
     --limit 1000 --n-workers 64 \
     --out-dir /root/capsule/scratch/tmp/foraging_cache \
-    --co-cache /root/capsule/scratch/tmp/co_discovery.parquet
+    --co-cache /root/capsule/scratch/tmp/co_discovery.pkl
 ```
 
 ---
@@ -187,7 +187,7 @@ Queries then use `union_by_name=true` to merge any remaining per-reader column d
 | `--limit N` | all | build only a random N-session subset (quick test) |
 | `--full-rebuild` | off | ignore `build_metadata.json` and reprocess every session |
 | `--no-coalesce` | off | keep one parquet file per session instead of per subject |
-| `--co-cache PATH` | — | dev: cache the ~137 s docDB discovery parquet (load if present, else fetch+save) |
+| `--co-cache PATH` | — | dev: cache the ~137 s docDB discovery (pickle) (load if present, else fetch+save) |
 
 Incremental by default: re-running only processes sessions not already in `build_metadata.json`.
 
