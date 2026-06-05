@@ -517,7 +517,7 @@ chain with a single parquet scan:
 `nwb_utils` read (33/33 sessions exact-match — see `README_build.md`). Solid = cache (measured),
 dashed = legacy `nwb_utils` (per-session cost, extrapolated):
 
-![Cache vs legacy nwb_utils fetch time](validate/cache_vs_legacy.png)
+![Cache vs legacy nwb_utils fetch time](src/aind_dynamic_foraging_database/validate/cache_vs_legacy.png)
 
 Memory scales with the columns you select (a few columns ≈ 10× less RAM than the full width);
 per-subject coalescing

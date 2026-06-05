@@ -225,7 +225,7 @@ repeated, re-sampled draws) against the TRUE legacy CO chain run serially —
 → the cache is **~10,000× faster**; it eliminates the per-session docDB query
 that dominates the legacy route.
 
-![Cache vs legacy fetch time](validate/cache_vs_legacy.png)
+![Cache vs legacy fetch time](src/aind_dynamic_foraging_database/validate/cache_vs_legacy.png)
 
 **Step 2 — apples-to-apples vs Han's master table.** Han's session stats are specific *sums
 over `df_trial`* (`process_nwbs.py`), and crucially Han's `total_trials` **excludes autowater
