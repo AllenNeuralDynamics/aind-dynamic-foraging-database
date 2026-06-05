@@ -520,6 +520,11 @@ chain with a single parquet scan:
 | Full DB (~23.6k), 5-col | **~6 s** | **~6 days** |
 | Full DB, full 103-col | **~53 s** | ~6 days |
 
+> **Not just faster — more complete.** A prior one-off `nwb_utils` effort reached only **~12k
+> sessions in ~6 days** — roughly **half** of what's in this cache (~24k). The per-session route
+> doesn't realistically scale to the full dataset, so in practice it also yielded **~2× less data**.
+> This cache is the *complete* set, rebuilt end-to-end in **under 2 h**.
+
 → **~10,000× faster** at full-dataset scale, verified equivalent to a direct
 `nwb_utils` read (33/33 sessions exact-match — see `README_build.md`). Solid = cache (measured),
 dashed = legacy `nwb_utils` (per-session cost, extrapolated):
