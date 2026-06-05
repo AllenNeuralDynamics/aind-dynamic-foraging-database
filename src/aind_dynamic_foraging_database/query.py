@@ -17,19 +17,12 @@ Two layers — reach for the simple helpers first, drop to native SQL when you n
 
 Why scoped reads are fast: a full ``trial_table/**/*.parquet`` glob with ``union_by_name``
 must read *every* subject file's footer to build the column union before it can prune
-(~9 s cold). Scoping the read to just the subjects you asked for reads only their footers
+(~25 s cold). Scoping the read to just the subjects you asked for reads only their footers
 (~1 s), while still unioning their columns correctly.
-
-Importing the package starts a background warmup that primes DuckDB's footer cache so even a
-full-table query is warm by your first real call (see :func:`start_warmup`); helper calls and
-escape-hatch SQL run on the shared :data:`connection` share that cache.
 
 Everything reads the public S3 cache (no AWS credentials needed). To query a local build,
 pass ``base=`` (or reassign ``SESSION_DB`` / ``TRIAL_DB`` / ``EVENT_DB``).
 """
-
-import os
-import threading
 
 import duckdb
 
@@ -49,13 +42,6 @@ DEFAULT_EVENT_COLUMNS = ["trial", "timestamps", "event", "data"]
 # Leading identity columns we always emit and never duplicate from the trial/event side.
 _KEYS = ("subject_id", "session_date", "session_id")
 
-# A dedicated module connection the helpers run on by default. Using our own connection (rather
-# than the bare ``duckdb`` default) lets the background warmup prime this instance's parquet-footer
-# cache *concurrently* via a cursor: DuckDB serializes one connection, but cursors of the same
-# instance run in parallel and share its cache. Run your own escape-hatch SQL on it too —
-# ``from aind_dynamic_foraging_database import connection`` — to reuse the warm cache.
-connection = duckdb.connect()
-
 
 # ---------------------------------------------------------------------------
 # Internals
@@ -63,8 +49,8 @@ connection = duckdb.connect()
 
 
 def _conn(con):
-    """Return the DuckDB connection to use (the given one, or the shared module connection)."""
-    return con if con is not None else connection
+    """Return the DuckDB connection to use (the given one, or the default module conn)."""
+    return con if con is not None else duckdb
 
 
 def _quote_in(values):
@@ -97,53 +83,6 @@ def _partition_subjects(base, con=None):
 def clear_caches():
     """Drop the memoized partition listings (call after rebuilding a cache in-session)."""
     _PARTITION_CACHE.clear()
-
-
-# ---------------------------------------------------------------------------
-# Background warmup — prime DuckDB's footer cache on import (best-effort)
-# ---------------------------------------------------------------------------
-
-# DuckDB caches each parquet file's footer (schema + row counts) per database instance, so the
-# *first* full-table query pays a one-time ~9 s cold footer scan; every query after is warm
-# (~1 s). We hide that scan behind import: a daemon thread touches all footers on a *cursor* of
-# the shared ``connection`` while the user reads docs / writes code. Cursors of one instance run
-# concurrently and share its cache, so this neither blocks nor slows a real query on
-# ``connection`` — it just makes the first one warm. Set ``AIND_DF_NO_WARMUP=1`` to disable.
-_warmup_thread = None
-_warmup_cursor = None  # held so the cursor is not GC'd mid-query (closes its siblings if it is)
-
-
-def _warmup():
-    """Touch every prod-table footer in one statement on a cursor of the shared connection.
-
-    Best-effort: any failure (offline, restricted S3, a transient hiccup) is ignored — the
-    only consequence is that the first real query pays the cold footer scan as it would have.
-    """
-    global _warmup_cursor
-    try:
-        _warmup_cursor = connection.cursor()
-        _warmup_cursor.sql(
-            f"SELECT (SELECT COUNT(*) FROM {_full_glob(TRIAL_DB)}), "
-            f"(SELECT COUNT(*) FROM {_full_glob(EVENT_DB)}), "
-            f"(SELECT COUNT(*) FROM read_parquet('{SESSION_DB}'))"
-        ).fetchone()
-    except Exception:
-        pass
-
-
-def start_warmup():
-    """Start the background footer-cache warmup once (no-op if disabled or already started).
-
-    Called automatically on ``import aind_dynamic_foraging_database``. On by default; set
-    ``AIND_DF_NO_WARMUP=1`` to skip. Safe to call repeatedly. Primes the shared
-    :data:`connection`, so it speeds up the helpers and any escape-hatch SQL you run on
-    ``connection``. Runs concurrently with your queries and never slows or errors them.
-    """
-    global _warmup_thread
-    if os.environ.get("AIND_DF_NO_WARMUP") or _warmup_thread is not None:
-        return
-    _warmup_thread = threading.Thread(target=_warmup, name="aind-df-warmup", daemon=True)
-    _warmup_thread.start()
 
 
 def _full_glob(base):
@@ -184,13 +123,10 @@ def _scoped_read(base, subjects, con):
 def read_trials(subjects=None, base=None, con=None):
     """Return a ``read_parquet(...)`` clause for the trial table, scoped to ``subjects``.
 
-    Drop the returned string into any SQL you write — run it on the shared :data:`connection`
-    so it reuses the warm footer cache::
+    Drop the returned string into any SQL you write::
 
-        from aind_dynamic_foraging_database import connection, read_trials
         src = read_trials(['754372', '758435'])
-        connection.sql(
-            f"SELECT subject_id, AVG(earned_reward::DOUBLE) FROM {src} GROUP BY subject_id")
+        duckdb.sql(f"SELECT subject_id, AVG(earned_reward::DOUBLE) FROM {src} GROUP BY subject_id")
 
     Scoping to the subjects you need reads only their partition files (~1 s) instead of
     every subject's footer. ``subjects=None`` falls back to the full (slow) glob over all
