@@ -8,16 +8,13 @@
 ![Python](https://img.shields.io/badge/python->=3.9-blue?logo=python)
 
 The **single, queryable source of truth for _all_ AIND dynamic-foraging behavior** — every
-session / trial / event, from every source (Code Ocean assets + Han bonsai/bpod NWBs), unified into
-one Hive-partitioned **parquet database** on a **public** S3 bucket (no AWS credentials to read).
-Pull behavior for any mice / sessions — or the whole dataset — in **seconds** with a few Python
-calls (the query helpers; DuckDB + pandas under the hood), instead of opening thousands of NWBs.
+session / trial / event, unified into one **parquet database** on a public S3 bucket. Query any
+mice / sessions, or the whole dataset, in **seconds** with a few Python calls (DuckDB + pandas) —
+instead of opening thousands of NWBs.
 
-> **Scale:** ~24k sessions · **12.5M trials** · **117M events** · 3 NWB readers merged into one schema.
-
-> **The complete dataset, finally queryable.** The previous best — Po-Chen's per-session `nwb_utils`
-> pipeline — reached only **~12k sessions over ~6 days**, about *half* of what exists. This database
-> is the **complete ~24k** — ~2× the data, queryable in **seconds** (~10,000× faster).
+> **~24k sessions · 12.5M trials · 117M events** — the *complete* dataset, [**~10,000× faster**](#vs-the-legacy-nwb_utils-route) to
+> query. (Per Po-Chen's test, reading data directly from NWBs via `aind-dynamic-foraging-data-utils`
+> took **~6 days and reached only ~12k sessions** — about half.)
 
 ## Installation
 

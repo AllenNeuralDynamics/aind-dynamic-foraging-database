@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "aind-dynamic-foraging-database"
@@ -49,11 +49,11 @@ dev = [
 [tool.uv.sources]
 aind-dynamic-foraging-data-utils = { git = "https://github.com/AllenNeuralDynamics/aind-dynamic-foraging-data-utils.git", branch = "han_DF_cache" }
 
-[tool.hatch.version]
-path = "src/aind_dynamic_foraging_database/__init__.py"
+[tool.setuptools.packages.find]
+where = ["src"]
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/aind_dynamic_foraging_database"]
+[tool.setuptools.dynamic]
+version = {attr = "aind_dynamic_foraging_database.__version__"}
 
 [tool.black]
 line-length = 100
