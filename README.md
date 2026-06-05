@@ -12,7 +12,7 @@ session / trial / event, unified into one **parquet database** on a public S3 bu
 mice / sessions, or the whole dataset, in **seconds** with a few Python calls (DuckDB + pandas) —
 instead of opening thousands of NWBs.
 
-> **~24k sessions · 12.5M trials · 117M events** — the *complete* dataset, **~10,000× faster** to
+> **~24k sessions · 12.5M trials · 117M events** — the *complete* dataset, [**~10,000× faster**](#vs-the-legacy-nwb_utils-route) to
 > query. (Per Po-Chen's test, reading data directly from NWBs via `aind-dynamic-foraging-data-utils`
 > took **~6 days and reached only ~12k sessions** — about half.)
 
