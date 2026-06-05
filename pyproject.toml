@@ -1,0 +1,91 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aind-dynamic-foraging-database"
+description = "Query (and build) the AIND dynamic-foraging behavioral parquet database."
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Allen Institute for Neural Dynamics" }]
+classifiers = ["Programming Language :: Python :: 3"]
+readme = "README.md"
+dynamic = ["version"]
+
+# Lightweight by default: everything needed to QUERY the public S3 database.
+# (DuckDB reads s3:// natively via its bundled httpfs — no s3fs/pyarrow needed to query.)
+dependencies = [
+    "duckdb",
+    "pandas",
+]
+
+[project.optional-dependencies]
+# Everything needed to BUILD/extend the database from NWBs. Depends on the NWB readers in
+# aind-dynamic-foraging-data-utils (nwb_utils, code_ocean_utils). Han's session table
+# (aind-analysis-arch-result-access) is CO-internal and installed separately when needed.
+build = [
+    "pynwb",
+    "hdmf_zarr",
+    "h5py",
+    "s3fs >= 2025.10.0",
+    "pyarrow",
+    "aind-data-access-api",
+    "codeocean",
+    "aind-dynamic-foraging-data-utils",
+]
+dev = [
+    "black",
+    "coverage",
+    "flake8",
+    "interrogate",
+    "isort",
+    "Sphinx",
+    "furo",
+]
+
+# Dev/CO only: pull the build's parent-side functions (get_dynamic_foraging_assets, ...) from the
+# han_DF_cache branch until they're released on PyPI (see the migration plan, "Track A").
+# Ignored by pip consumers and stripped from the published wheel metadata.
+[tool.uv.sources]
+aind-dynamic-foraging-data-utils = { git = "https://github.com/AllenNeuralDynamics/aind-dynamic-foraging-data-utils.git", branch = "han_DF_cache" }
+
+[tool.hatch.version]
+path = "src/aind_dynamic_foraging_database/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aind_dynamic_foraging_database"]
+
+[tool.black]
+line-length = 100
+target_version = ['py39']
+
+[tool.isort]
+line_length = 100
+profile = "black"
+
+[tool.interrogate]
+exclude = ["docs", "build", "src/aind_dynamic_foraging_database/validate"]
+fail-under = 100
+
+[tool.coverage.run]
+# Omit modules that need external resources (S3 / docDB / NWB reads, parquet build in worker
+# subprocesses). The query helpers and post-processing stay measured.
+omit = [
+    "*__init__*",
+    "*/build_cache.py",
+    "*/query_examples.py",
+    "*/util/parquet_builder.py",
+    "*/util/nwb_reader_aind.py",
+    "*/util/nwb_reader_legacy.py",
+    "*/validate/*",
+]
+source = ["aind_dynamic_foraging_database", "tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "if __name__ == .__main__.:",
+    "from",
+    "import",
+    "pragma: no cover",
+]
+fail_under = 80

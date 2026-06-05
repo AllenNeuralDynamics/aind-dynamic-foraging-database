@@ -1,4 +1,4 @@
-# `foraging_cache` — building the parquet database
+# `aind-dynamic-foraging-database` — building the parquet database
 
 How to **build / incrementally extend** the Hive-partitioned parquet database of AIND
 dynamic-foraging behavioral data (one row per session / trial / event), assembled from NWB
@@ -9,15 +9,35 @@ files across three sources.
 
 ---
 
+## Installation
+
+Building needs the `build` extra (NWB readers + parquet pipeline + `aind-dynamic-foraging-data-utils`):
+
+```bash
+pip install "aind-dynamic-foraging-database[build]"
+```
+
+With **uv** (recommended in Code Ocean — pulls the parent's reader functions from its branch until
+they're released on PyPI):
+
+```bash
+uv sync --extra build
+```
+
+Building the **session table** additionally needs Han's pipeline package
+(`aind-analysis-arch-result-access`, AIND-internal), installed separately.
+
+---
+
 ## Quick start
 
 ```bash
 # Build / incrementally extend the production cache on S3 (recommended workers: 64)
-python -m aind_dynamic_foraging_data_utils.foraging_cache.build_cache \
+python -m aind_dynamic_foraging_database.build_cache \
     --out-dir s3://aind-scratch-data/aind-dynamic-foraging-cache --n-workers 64
 
 # Quick local test on a random 1000-session subset (caches the docDB discovery)
-python -m aind_dynamic_foraging_data_utils.foraging_cache.build_cache \
+python -m aind_dynamic_foraging_database.build_cache \
     --limit 1000 --n-workers 64 \
     --out-dir /root/capsule/scratch/tmp/foraging_cache \
     --co-cache /root/capsule/scratch/tmp/co_discovery.parquet

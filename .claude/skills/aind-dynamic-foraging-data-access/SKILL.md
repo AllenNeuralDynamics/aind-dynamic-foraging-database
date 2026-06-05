@@ -2,7 +2,7 @@
 name: aind-dynamic-foraging-data-access
 description: >
   How to ACCESS AIND dynamic-foraging behavioral data (the
-  aind-dynamic-foraging-data-utils repo): the session / trial / event parquet
+  aind-dynamic-foraging-database repo): the session / trial / event parquet
   cache on public S3 and how to query it with DuckDB, the table schemas and
   key/filter columns, the data sources (AIND Code Ocean assets + Han bonsai/bpod
   NWBs), and the NWB-reading functions (create_df_trials / create_df_events,
@@ -15,11 +15,11 @@ description: >
 
 AIND dynamic-foraging behavior originates as per-session **NWB files**; for analysis, query the
 **parquet cache** built from them (see [Parquet Database](#parquet-database-the-primary-way-to-access-behavior)
-below) rather than opening NWBs. The repo is `aind-dynamic-foraging-data-utils`; the cache lives in
-its `foraging_cache/` sub-package. Query it with the helpers in `foraging_cache.query`
+below) rather than opening NWBs. The repo / package is `aind-dynamic-foraging-database`. Query it
+with the helpers in `aind_dynamic_foraging_database`
 (`select_sessions` → `fetch_trials`/`fetch_events`; DuckDB under the hood), and drop to native
 SQL via `read_trials`/`read_events` when you need more. **Authoritative docs:**
-`foraging_cache/README.md` (querying — self-contained, paste into an LLM as context) and
+`README.md` (querying — self-contained, paste into an LLM as context) and
 `README_build.md` (building).
 
 ## Data Sources
@@ -61,20 +61,20 @@ Canonical key: `(subject_id, session_date, nwb_suffix)` as a 3-tuple.
 
 A Hive-partitioned parquet cache of all dynamic-foraging behavior on a **public** S3 bucket (no
 AWS credentials needed to read). **Authoritative, self-contained querying doc:**
-`foraging_cache/README.md` — paste it into an LLM as context to generate queries; full schema +
+`README.md` — paste it into an LLM as context to generate queries; full schema +
 query patterns in `references/parquet-api.md`.
 
 **S3 location**: `s3://aind-scratch-data/aind-dynamic-foraging-cache/` (paths `SESSION_DB` /
 `TRIAL_DB` / `EVENT_DB` and the query helpers below are importable from
-`aind_dynamic_foraging_data_utils.foraging_cache`).
+`aind_dynamic_foraging_database`).
 - `session_table.parquet` — one row per session (~24k × 160 cols). Unions Han metadata with the
   Code Ocean universe; the ~381 CO-only sessions absent from Han have all Han columns NULL.
 - `trial_table/subject_id=<id>/<subject_id>.parquet` — Hive-partitioned, 1 file/subject (~12.5M × 103 cols)
 - `event_table/subject_id=<id>/<subject_id>.parquet` — Hive-partitioned, 1 file/subject
 
-**Querying — use the helpers first (`foraging_cache.query`):**
+**Querying — use the helpers first (`aind_dynamic_foraging_database`):**
 ```python
-from aind_dynamic_foraging_data_utils.foraging_cache import select_sessions, fetch_trials, fetch_events
+from aind_dynamic_foraging_database import select_sessions, fetch_trials, fetch_events
 sel    = select_sessions("task LIKE '%Uncoupled%' AND foraging_eff > 0.8")  # filter the session table
 trials = fetch_trials(sel, columns=["animal_response", "earned_reward"])     # their trials + metadata joined
 ```

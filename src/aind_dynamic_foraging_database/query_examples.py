@@ -8,15 +8,15 @@ built by ``build_cache`` (local dir or ``s3://`` prefix); DuckDB reads S3 native
 
 Run:
     # against the production S3 cache
-    python -m aind_dynamic_foraging_data_utils.foraging_cache.query_examples \\
+    python -m aind_dynamic_foraging_database.query_examples \\
         --out-dir s3://aind-scratch-data/aind-dynamic-foraging-cache
 
     # against a local build
-    python -m aind_dynamic_foraging_data_utils.foraging_cache.query_examples \\
+    python -m aind_dynamic_foraging_database.query_examples \\
         --out-dir /root/capsule/scratch/tmp/foraging_cache
 
 Programmatic use:
-    from aind_dynamic_foraging_data_utils.foraging_cache import query_examples as q
+    from aind_dynamic_foraging_database import query_examples as q
     dfs = q.run("s3://aind-scratch-data/aind-dynamic-foraging-cache")
     dfs["trials"], dfs["events"], dfs["sessions"]
 """

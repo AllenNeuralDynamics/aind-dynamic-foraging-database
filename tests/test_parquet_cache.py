@@ -19,7 +19,7 @@ import duckdb
 import pandas as pd
 import pyarrow.parquet as pq
 
-from aind_dynamic_foraging_data_utils.foraging_cache.util import parquet_builder
+from aind_dynamic_foraging_database.util import parquet_builder
 
 # The session-table round-trip tests exercise build_session_table, whose session
 # source is the CO-internal aind_analysis_arch_result_access (Han pipeline). It is

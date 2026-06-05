@@ -27,7 +27,7 @@ import numpy as np, pandas as pd, duckdb
 
 from aind_dynamic_foraging_data_utils import nwb_utils
 import aind_dynamic_foraging_data_utils.code_ocean_utils as cou
-from aind_dynamic_foraging_data_utils.foraging_cache.util import nwb_reader_legacy, parquet_builder
+from aind_dynamic_foraging_database.util import nwb_reader_legacy, parquet_builder
 
 OUT = "s3://aind-scratch-data/aind-dynamic-foraging-cache"
 TRIALS = f"read_parquet('{OUT}/trial_table/**/*.parquet', hive_partitioning=true, union_by_name=true)"
@@ -101,7 +101,7 @@ def main(cache_only=False):
     cache = pd.DataFrame(rows); cache.to_csv(f"{ART}/cache_timing.csv", index=False)
 
     if cache_only:
-        from aind_dynamic_foraging_data_utils.foraging_cache.validate import plot_validation
+        from aind_dynamic_foraging_database.validate import plot_validation
         plot_validation.main()
         print("DONE (cache-only)", flush=True)
         return
@@ -198,7 +198,7 @@ def main(cache_only=False):
     #      bbox_inches='tight', which otherwise blows up the canvas height under
     #      the wide log-scale autoscale of the legacy extrapolation) ----
     print("== figure ==", flush=True)
-    from aind_dynamic_foraging_data_utils.foraging_cache.validate import plot_validation
+    from aind_dynamic_foraging_database.validate import plot_validation
     plot_validation.main()
     print("\nLEGACY per-session (cold full chain):\n" +
           legacy.groupby(["source", "op"]).per_session.mean().round(1).to_string(), flush=True)

@@ -1,11 +1,34 @@
-# `foraging_cache` — querying the dynamic-foraging parquet database
+# `aind-dynamic-foraging-database` — querying the dynamic-foraging parquet database
 
 A Hive-partitioned **parquet database** of AIND dynamic-foraging behavior (one row per
 session / trial / event), assembled from NWB files across three sources. Pull behavior for
 arbitrary mice / sessions — or the whole dataset — in **seconds** with a few Python calls (the
 **query helpers**, DuckDB + pandas under the hood), instead of opening thousands of NWBs.
 
-> 🚀 **Start with the query helpers** — importable from `aind_dynamic_foraging_data_utils.foraging_cache`,
+## Installation
+
+Querying is lightweight — just `duckdb` + `pandas`:
+
+```bash
+pip install aind-dynamic-foraging-database
+```
+
+Or install the latest straight from GitHub (prefix with `!` in a notebook):
+
+```bash
+pip install "git+https://github.com/AllenNeuralDynamics/aind-dynamic-foraging-database.git"
+```
+
+To **build or extend** the database from NWBs, install the `build` extra (adds the NWB readers
++ `aind-dynamic-foraging-data-utils`) — see [`README_build.md`](README_build.md):
+
+```bash
+pip install "aind-dynamic-foraging-database[build]"
+```
+
+---
+
+> 🚀 **Start with the query helpers** — importable from `aind_dynamic_foraging_database`,
 > they wrap DuckDB and hand back a pandas DataFrame:
 > - **`select_sessions(where=…, subjects=…, columns=…)`** — filter the (small) session table on any
 >   metric / metadata (or a subject list); returns a DataFrame of the selected sessions.
@@ -55,7 +78,7 @@ setup** (httpfs auto-loads). Point at a local directory instead to query a local
 The paths are importable:
 
 ```python
-from aind_dynamic_foraging_data_utils.foraging_cache import SESSION_DB, TRIAL_DB, EVENT_DB
+from aind_dynamic_foraging_database import SESSION_DB, TRIAL_DB, EVENT_DB
 ```
 
 ---
@@ -67,7 +90,7 @@ partition files, fast *and* correct) and hand back a pandas DataFrame. Drop to
 [native SQL](#native-sql-what-the-helpers-are-built-on) only when you need more.
 
 ```python
-from aind_dynamic_foraging_data_utils.foraging_cache import (
+from aind_dynamic_foraging_database import (
     select_sessions, fetch_trials, fetch_events,
 )
 
@@ -108,7 +131,7 @@ power of SQL without the slow full-table glob:
 
 ```python
 import duckdb
-from aind_dynamic_foraging_data_utils.foraging_cache import read_trials
+from aind_dynamic_foraging_database import read_trials
 
 src = read_trials(["754372", "758435"])           # scoped -> reads only these subjects' files
 duckdb.sql(f"""
@@ -344,7 +367,7 @@ should**:
 
 ```python
 import duckdb
-from aind_dynamic_foraging_data_utils.foraging_cache import SESSION_DB, TRIAL_DB, EVENT_DB
+from aind_dynamic_foraging_database import SESSION_DB, TRIAL_DB, EVENT_DB
 READ_TRIALS = f"read_parquet('{TRIAL_DB}/**/*.parquet', hive_partitioning=true, union_by_name=true)"
 READ_EVENTS = f"read_parquet('{EVENT_DB}/**/*.parquet', hive_partitioning=true, union_by_name=true)"
 ```

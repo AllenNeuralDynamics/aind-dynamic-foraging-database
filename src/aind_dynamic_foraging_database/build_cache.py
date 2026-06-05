@@ -23,17 +23,17 @@ Output target:
 
 Run:
     # incremental local build (default scratch dir)
-    python -m aind_dynamic_foraging_data_utils.foraging_cache.build_cache
+    python -m aind_dynamic_foraging_database.build_cache
 
     # production build/update on S3 (--n-workers 64 ~= 4x faster; see --help)
-    python -m aind_dynamic_foraging_data_utils.foraging_cache.build_cache \\
+    python -m aind_dynamic_foraging_database.build_cache \\
         --out-dir s3://aind-scratch-data/aind-dynamic-foraging-cache --n-workers 64
 
     # quick smoke test on a random 300-session subset (spans all three routes)
-    python -m aind_dynamic_foraging_data_utils.foraging_cache.build_cache --limit 300
+    python -m aind_dynamic_foraging_database.build_cache --limit 300
 
 Or drive it programmatically (the module is import-safe — nothing runs on import):
-    from aind_dynamic_foraging_data_utils.foraging_cache import build_cache as b
+    from aind_dynamic_foraging_database import build_cache as b
     b.main(b.Config(out_dir="/root/capsule/scratch/tmp/foraging_cache", limit=300))
 """
 
@@ -43,7 +43,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from aind_dynamic_foraging_data_utils.foraging_cache.util import parquet_builder
+from aind_dynamic_foraging_database.util import parquet_builder
 
 logger = logging.getLogger(__name__)
 

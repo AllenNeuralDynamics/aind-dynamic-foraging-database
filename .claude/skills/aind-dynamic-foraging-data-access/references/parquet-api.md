@@ -2,7 +2,7 @@
 
 The cache is the **primary way to access** dynamic-foraging behavior. This file is a condensed
 schema + query reference; the **authoritative, self-contained doc is
-`src/aind_dynamic_foraging_data_utils/foraging_cache/README.md`** (paste it into an LLM as
+`src/aind_dynamic_foraging_database/README.md`** (paste it into an LLM as
 context to generate queries). It reads natively over S3 — the bucket is **public, no AWS
 credentials needed**.
 
@@ -15,7 +15,7 @@ s3://aind-scratch-data/aind-dynamic-foraging-cache/
 └── event_table/subject_id=<id>/<id>.parquet     # Hive-partitioned, 1 file/subject (~117M × 10)
 ```
 
-Importable: `from aind_dynamic_foraging_data_utils.foraging_cache import SESSION_DB, TRIAL_DB, EVENT_DB`
+Importable: `from aind_dynamic_foraging_database import SESSION_DB, TRIAL_DB, EVENT_DB`
 
 ## Keys & joins
 
@@ -61,7 +61,7 @@ trials via the keys:
 
 ```python
 import duckdb
-from aind_dynamic_foraging_data_utils.foraging_cache import SESSION_DB, TRIAL_DB
+from aind_dynamic_foraging_database import SESSION_DB, TRIAL_DB
 
 READ_TRIALS = f"read_parquet('{TRIAL_DB}/**/*.parquet', hive_partitioning=true, union_by_name=true)"
 
@@ -83,12 +83,12 @@ df = duckdb.sql(f"""
 
 Conventions: **project only the columns you need** (the full trial table is ~21 GB; a few
 columns is ~seconds); `total_trials` excludes autowater; `subject_id`/`session_date` are strings;
-grouping on `subject_id` also needs the `CAST`. See `foraging_cache/README.md` for the full
+grouping on `subject_id` also needs the `CAST`. See `README.md` for the full
 schema catalog, common filter columns, worked examples, and an LLM-ready preamble.
 
 ## Reading a single NWB directly (bypassing the cache)
 
 `nwb_utils.create_df_trials(nwb_path)` / `create_df_events(nwb_path)` parse one AIND-format NWB
 (local path or `s3://`); for Han bonsai/bpod NWBs use the legacy reader in
-`foraging_cache/util/nwb_reader_legacy.py`. The cache is built from these readers — for analysis,
+`aind_dynamic_foraging_database/util/nwb_reader_legacy.py`. The cache is built from these readers — for analysis,
 query the cache instead (it's ~10,000× faster than opening NWBs one session at a time).
