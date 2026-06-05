@@ -10,6 +10,7 @@ arbitrary mice / sessions — or the whole dataset — in **seconds** with a few
 Querying is lightweight — just `duckdb` + `pandas`:
 
 ```bash
+uv add aind-dynamic-foraging-database     # uv (recommended)
 pip install aind-dynamic-foraging-database
 ```
 
@@ -23,6 +24,7 @@ To **build or extend** the database from NWBs, install the `build` extra (adds t
 + `aind-dynamic-foraging-data-utils`) — see [`README_build.md`](README_build.md):
 
 ```bash
+uv add "aind-dynamic-foraging-database[build]"
 pip install "aind-dynamic-foraging-database[build]"
 ```
 
