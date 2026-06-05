@@ -7,6 +7,8 @@
 ![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?logo=codecov)
 ![Python](https://img.shields.io/badge/python->=3.9-blue?logo=python)
 
+> **The complete dataset, finally queryable.** The previous best — Po-Chen's per-session `nwb_utils` pipeline — reached only **~12k sessions over ~6 days**, about *half* of what exists. This database holds the **complete ~24k sessions** (12.5M trials · 117M events), queryable in **seconds**.
+
 A Hive-partitioned **parquet database** of AIND dynamic-foraging behavior (one row per
 session / trial / event), assembled from NWB files across three sources. Pull behavior for
 arbitrary mice / sessions — or the whole dataset — in **seconds** with a few Python calls (the
@@ -484,7 +486,7 @@ want — no need to paste this README.
 
 ---
 
-## Read performance (full prod cache — ~23.6k sessions, 12.5M trials, over S3)
+## Read performance (full database — ~24k sessions, 12.5M trials, over S3)
 
 **Scope the read to the subjects you need** — this is what the helpers do, and it dominates
 selective-query latency:
@@ -505,28 +507,28 @@ Whole-dataset reads (where you genuinely touch every subject, so the footer scan
 
 ### vs. the legacy `nwb_utils` route
 
-The way to get this data *without* the cache is to open each session's NWB yourself —
+The way to get this data *without* the new database is to open each session's NWB yourself —
 `code_ocean_utils.get_subject_assets()` (docDB query) → `add_s3_location()` (S3 glob) →
 `nwb_utils.create_df_trials()` / `create_df_events()` — **one session at a time**. That costs
 **~23 s per session** (dominated by the **~17 s docDB query**; +~4 s to open/parse the NWB,
 +~3 s for events), and it does **not** scale: there's no projection (you read the whole NWB to
-get 5 columns) and every session pays the docDB round-trip again. The cache replaces the whole
+get 5 columns) and every session pays the docDB round-trip again. The new database replaces the whole
 chain with a single parquet scan:
 
-| Fetch | **Cache** (DuckDB / parquet) | **Legacy `nwb_utils`** (per-session NWB) |
+| Fetch | **The new database** (~24k sessions) | **Legacy `nwb_utils`** (~12k sessions) |
 |---|---|---|
 | 1 session, trials | ~1 s | ~23 s |
 | 100 sessions, trials | ~3 s | **~40 min** |
-| Full DB (~23.6k), 5-col | **~6 s** | **~6 days** |
+| Full DB, 5-col | **~6 s** | **~6 days** |
 | Full DB, full 103-col | **~53 s** | ~6 days |
 
-> **Not just faster — more complete.** A prior one-off `nwb_utils` effort reached only **~12k
-> sessions in ~6 days** — roughly **half** of what's in this cache (~24k). The per-session route
+> **Not just faster — more complete.** Po-Chen's prior `nwb_utils` effort reached only **~12k
+> sessions in ~6 days** — roughly **half** of what's here (~24k). The per-session route
 > doesn't realistically scale to the full dataset, so in practice it also yielded **~2× less data**.
-> This cache is the *complete* set, rebuilt end-to-end in **under 2 h**.
+> The new database is the *complete* set, rebuilt end-to-end in **under 2 h**.
 
 → **~10,000× faster** at full-dataset scale, verified equivalent to a direct
-`nwb_utils` read (33/33 sessions exact-match — see `README_build.md`). Solid = cache (measured),
+`nwb_utils` read (33/33 sessions exact-match — see `README_build.md`). Solid = the new database (measured),
 dashed = legacy `nwb_utils` (per-session cost, extrapolated):
 
 ![Cache vs legacy nwb_utils fetch time](src/aind_dynamic_foraging_database/validate/cache_vs_legacy.png)
