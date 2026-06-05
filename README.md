@@ -143,11 +143,10 @@ partition-scoped `read_parquet(...)` clause** you drop into any SQL — so you k
 power of SQL without the slow full-table glob:
 
 ```python
-import duckdb
-from aind_dynamic_foraging_database import read_trials
+from aind_dynamic_foraging_database import connection, read_trials
 
 src = read_trials(["754372", "758435"])           # scoped -> reads only these subjects' files
-duckdb.sql(f"""
+connection.sql(f"""                               # run on the shared connection -> warm cache
     SELECT subject_id, COUNT(*) AS n_trials, AVG(earned_reward::DOUBLE) AS reward_rate
     FROM {src} GROUP BY subject_id ORDER BY subject_id
 """).df()
@@ -158,6 +157,12 @@ query, but reads every subject's footer — slow; scope to subjects whenever you
 
 > All helpers query the public S3 cache by default. Pass `base=` (a local dir or another S3
 > prefix) to any of them to query a different build.
+>
+> **First-query warmup.** Importing the package starts a background thread that primes DuckDB's
+> parquet-footer cache, so even a full-table query is warm by your first real call (the helpers
+> use it automatically). Run your own SQL on the shared `connection` — `from
+> aind_dynamic_foraging_database import connection` — to reuse that cache. Set
+> `AIND_DF_NO_WARMUP=1` to disable.
 
 ---
 

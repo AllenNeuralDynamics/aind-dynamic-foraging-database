@@ -11,6 +11,9 @@ native DuckDB SQL when you need more::
 The default read targets (``SESSION_DB`` / ``TRIAL_DB`` / ``EVENT_DB``) live on a public S3 bucket,
 so reading needs no AWS credentials.
 
+Importing this package kicks off a background "warmup" that primes DuckDB's parquet-footer cache
+so your first query skips the one-time ~9 s cold footer scan (set ``AIND_DF_NO_WARMUP=1`` to skip).
+
 Building/extending the database lives in ``build_cache`` / ``util.parquet_builder`` and needs the
 optional ``[build]`` extra (NWB readers + ``aind-dynamic-foraging-data-utils``); it is intentionally
 **not** imported here, so importing this package to *query* stays lightweight.
@@ -23,9 +26,14 @@ from aind_dynamic_foraging_database.query import (  # noqa: F401
     PROD_S3_PREFIX,
     SESSION_DB,
     TRIAL_DB,
+    clear_caches,
+    connection,
     fetch_events,
     fetch_trials,
     read_events,
     read_trials,
     select_sessions,
+    start_warmup,
 )
+
+start_warmup()  # prime DuckDB's footer cache in the background (AIND_DF_NO_WARMUP=1 to skip)
