@@ -490,6 +490,16 @@ want — no need to paste this README.
 
 ## Read performance (full database — ~24k sessions, 12.5M trials, over S3)
 
+> ⚙️ **These timings assume a multi-vCPU machine (measured on 16 vCPUs).** DuckDB parallelizes
+> across all the machine's vCPUs, so query speed scales with cores (and RAM). On a **1-vCPU
+> capsule** DuckDB runs **single-threaded** — full-table scans and broad joins can be **~10× slower**,
+> and the join/sort may spill to disk if RAM is small. Check yours with
+> `import os; os.cpu_count()` and
+> `duckdb.sql("SELECT current_setting('threads') AS threads, current_setting('memory_limit') AS mem").df()`.
+> For whole-database / broad queries, run the capsule on **several vCPUs**; for everything else,
+> **scope to subjects** (below) — that stays fast even on a single core. (Also run compute in the
+> **same region as the bucket, `us-west-2`** — cross-region S3 makes every read much slower.)
+
 **Scope the read to the subjects you need** — this is what the helpers do, and it dominates
 selective-query latency:
 
