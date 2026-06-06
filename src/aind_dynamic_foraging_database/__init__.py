@@ -23,6 +23,7 @@ from aind_dynamic_foraging_database.query import (  # noqa: F401
     PROD_S3_PREFIX,
     SESSION_DB,
     TRIAL_DB,
+    clear_caches,
     fetch_events,
     fetch_trials,
     read_events,

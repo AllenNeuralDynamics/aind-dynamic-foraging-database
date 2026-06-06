@@ -490,6 +490,13 @@ want — no need to paste this README.
 
 ## Read performance (full database — ~24k sessions, 12.5M trials, over S3)
 
+> ⚙️ **These timings assume a well-resourced capsule in `us-west-2` (measured on 16 vCPUs).** Query
+> speed depends heavily on the capsule's vCPUs, RAM, and region — an under-resourced or cross-region
+> capsule can be **much slower** (fewer cores, RAM spilling to disk, slow cross-region S3). Check yours
+> with `os.cpu_count()` and `duckdb.sql("SELECT current_setting('threads'), current_setting('memory_limit')").df()`.
+> For broad / whole-database queries prefer a capsule with **several vCPUs + RAM, in `us-west-2`**;
+> otherwise **scope to subjects** (below).
+
 **Scope the read to the subjects you need** — this is what the helpers do, and it dominates
 selective-query latency:
 

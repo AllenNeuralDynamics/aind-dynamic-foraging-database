@@ -79,7 +79,11 @@ class TestQueryHelpers(unittest.TestCase):
             tr = query.fetch_trials(sel, base=trial_prefix,
                                     columns=["animal_response", "earned_reward"])
             self.assertGreater(len(tr), 0)
-            self.assertEqual(list(tr.columns[:3]), ["subject_id", "session_date", "session_id"])
+            # keys + the always-returned within-session 'trial' index lead the columns,
+            # even though 'trial' was not among the requested columns
+            self.assertEqual(list(tr.columns[:4]),
+                             ["subject_id", "session_date", "session_id", "trial"])
+            self.assertEqual(tr["trial"].isna().sum(), 0)
             for col in ["task", "foraging_eff", "animal_response", "earned_reward"]:
                 self.assertIn(col, tr.columns)
             # exactly the selected sessions, nothing extra

@@ -58,16 +58,31 @@ def _quote_in(values):
     return ", ".join("'" + str(v).replace("'", "''") + "'" for v in values)
 
 
+# Per-base cache of the partition subject set. The listing is one S3 LIST (~0.4 s) and the
+# cache is otherwise re-run on *every* fetch; the set of partitions is static within a session.
+_PARTITION_CACHE = {}
+
+
 def _partition_subjects(base, con=None):
-    """Subject ids that actually have a partition file under ``base``.
+    """Subject ids that actually have a partition file under ``base`` (memoized per base).
 
     One cheap S3 LIST via ``glob()`` (not a footer scan) — used to drop requested
     subjects with no files, since a scoped ``read_parquet`` list errors on a path that
-    matches nothing.
+    matches nothing. Cached per ``base`` (call :func:`clear_caches` after rebuilding a
+    local cache in the same session).
     """
+    cached = _PARTITION_CACHE.get(base)
+    if cached is not None:
+        return cached
     rows = _conn(con).sql(f"SELECT file FROM glob('{base}/subject_id=*/*.parquet')").df()
     found = rows["file"].str.extract(r"subject_id=([^/]+)/")[0].dropna()
-    return set(found)
+    _PARTITION_CACHE[base] = result = set(found)
+    return result
+
+
+def clear_caches():
+    """Drop the memoized partition listings (call after rebuilding a cache in-session)."""
+    _PARTITION_CACHE.clear()
 
 
 def _full_glob(base):
@@ -75,15 +90,28 @@ def _full_glob(base):
     return f"read_parquet('{base}/**/*.parquet', hive_partitioning=true, union_by_name=true)"
 
 
+# Above this many subjects, an explicit per-subject file list (one S3 listing per path + a slow
+# read_parquet([...]) union) costs more than the full glob with a partition-pruning WHERE.
+_SCOPED_MAX = 100
+
+
 def _scoped_read(base, subjects, con):
-    """Build a ``read_parquet(...)`` clause scoped to ``subjects`` (or the full glob)."""
+    """Build a ``read_parquet(...)`` clause scoped to ``subjects`` (or the full glob).
+
+    Few subjects -> an explicit per-subject file list (skips the full-footer scan, ~1 s). Many
+    subjects (> ``_SCOPED_MAX``) -> the full glob with ``WHERE subject_id IN (...)``, which DuckDB
+    prunes to just those partitions and is far faster than a long ``read_parquet([...])`` list.
+    """
     if subjects is None:
         return _full_glob(base)
-    want = {str(s) for s in subjects} & _partition_subjects(base, con)
-    files = [f"'{base}/subject_id={s}/*.parquet'" for s in sorted(want)]
-    if not files:
+    want = sorted({str(s) for s in subjects} & _partition_subjects(base, con))
+    if not want:
         # No requested subject has data: yield zero rows but the correct full schema.
         return f"(SELECT * FROM {_full_glob(base)} WHERE false)"
+    if len(want) > _SCOPED_MAX:
+        return (f"(SELECT * FROM {_full_glob(base)} "
+                f"WHERE CAST(subject_id AS VARCHAR) IN ({_quote_in(want)}))")
+    files = [f"'{base}/subject_id={s}/*.parquet'" for s in want]
     return f"read_parquet([{', '.join(files)}], hive_partitioning=true, union_by_name=true)"
 
 
@@ -195,6 +223,8 @@ def fetch_trials(sessions, columns=None, base=None, con=None):
     columns : list[str] or "*", optional
         Trial columns to project (default: a small choice/reward set). ``"*"`` returns all
         103 columns (large). Columns absent for the selected subjects come back all-NULL.
+        The within-session index ``trial`` is **always** included (you can't identify a trial
+        without it), so you never need to list it — it leads the projected columns.
     base : str, optional
         Trial-table **directory** prefix (default: the production S3 ``trial_table``). Pass a
         local dir / other S3 prefix to query another build.
@@ -205,11 +235,11 @@ def fetch_trials(sessions, columns=None, base=None, con=None):
     Returns
     -------
     pandas.DataFrame
-        One row per trial, leading ``subject_id, session_date, session_id``, ordered by
+        One row per trial, leading ``subject_id, session_date, session_id, trial``, ordered by
         ``subject_id, session_date, trial``.
     """
     return _fetch(sessions, base or TRIAL_DB, columns or DEFAULT_TRIAL_COLUMNS,
-                  con, order_tail="trial")
+                  con, order_tail="trial", lead="trial")
 
 
 def fetch_events(sessions, events=None, columns=None, base=None, con=None):
@@ -244,13 +274,13 @@ def fetch_events(sessions, events=None, columns=None, base=None, con=None):
                   con, order_tail="timestamps", extra_where=extra_where)
 
 
-def _fetch(sessions, base, columns, con, order_tail, extra_where=None):
+def _fetch(sessions, base, columns, con, order_tail, extra_where=None, lead=None):
     """Shared core for fetch_trials / fetch_events: scoped read + join to selected sessions.
 
-    A scoped read exposes only the columns present in *those* subjects' files (some columns
-    are reader-specific, e.g. ``trial`` is absent from some legacy files). So we adapt to the
-    columns actually available: requested columns that are missing are emitted as all-NULL
-    (stable output shape, never an error), and the ORDER BY tail is dropped if absent.
+    Runs optimistically — ``union_by_name`` already null-fills columns missing from *some* selected
+    files. Only if a requested column (or the sort key) is absent from *every* selected file (a
+    BinderError) do we DESCRIBE the source, null-pad those columns / drop the sort key, and retry.
+    This keeps the common path off the expensive full-footer DESCRIBE.
     """
     import pandas as pd
 
@@ -258,27 +288,48 @@ def _fetch(sessions, base, columns, con, order_tail, extra_where=None):
         return pd.DataFrame()
     conn = _conn(con)
     src = _scoped_read(base, sessions["subject_id"].unique().tolist(), con)
-    avail = set(conn.sql(f"DESCRIBE SELECT * FROM {src}").df()["column_name"])
     conn.register("_sel_sessions", sessions)
-
-    meta = [f"s.{c}" for c in sessions.columns if c not in ("_session_id", *_KEYS)]
-    if columns in ("*", ["*"]):
-        proj = [f"t.* EXCLUDE ({', '.join(k for k in _KEYS if k in avail)})"]
-    else:
-        proj = [f"t.{c}" if c in avail else f"CAST(NULL AS DOUBLE) AS {c}"
-                for c in columns if c not in _KEYS]
-    select = ", ".join(["s.subject_id", "s.session_date", "t.session_id", *meta, *proj])
-    where_sql = f"WHERE {extra_where}" if extra_where else ""
-    order = ["s.subject_id", "s.session_date"]
-    if order_tail in avail:
-        order.append(f"t.{order_tail}")
     try:
-        return conn.sql(f"""
-            SELECT {select}
-            FROM {src} t
-            JOIN _sel_sessions s ON t.session_id = s._session_id
-            {where_sql}
-            ORDER BY {', '.join(order)}
-        """).df()
+        try:
+            return _run_fetch(conn, src, sessions, columns, order_tail, extra_where, None, lead)
+        except duckdb.BinderException:
+            avail = set(conn.sql(f"DESCRIBE SELECT * FROM {src}").df()["column_name"])
+            return _run_fetch(conn, src, sessions, columns, order_tail, extra_where, avail, lead)
     finally:
         conn.unregister("_sel_sessions")
+
+
+def _col_expr(col, avail):
+    """Project trial/event column ``col``, null-padding (as DOUBLE) if absent from every file."""
+    return f"t.{col}" if (avail is None or col in avail) else f"CAST(NULL AS DOUBLE) AS {col}"
+
+
+def _run_fetch(conn, src, sessions, columns, order_tail, extra_where, avail, lead=None):
+    """Build + run the scoped fetch query and join in the selected sessions' metadata.
+
+    ``avail=None`` projects every requested column as-is (optimistic). A set of available columns
+    null-pads any that are missing and drops the sort key if it's absent. ``lead`` (if given) is
+    always projected, right after the session keys and before the carried metadata — so e.g.
+    ``trial`` stays adjacent to the identity columns regardless of the requested ``columns``.
+    """
+    meta = [f"s.{c}" for c in sessions.columns if c not in ("_session_id", *_KEYS)]
+    lead_proj = [_col_expr(lead, avail)] if lead else []
+    if columns in ("*", ["*"]):
+        excl = [k for k in _KEYS if avail is None or k in avail]
+        if lead and (avail is None or lead in avail):
+            excl.append(lead)  # pulled to the front via lead_proj instead of left in t.*
+        proj = [f"t.* EXCLUDE ({', '.join(excl)})"]
+    else:
+        proj = [_col_expr(c, avail) for c in columns if c not in _KEYS and c != lead]
+    select = ", ".join(["s.subject_id", "s.session_date", "t.session_id", *lead_proj, *meta, *proj])
+    where_sql = f"WHERE {extra_where}" if extra_where else ""
+    order = ["s.subject_id", "s.session_date"]
+    if avail is None or order_tail in avail:
+        order.append(f"t.{order_tail}")
+    return conn.sql(f"""
+        SELECT {select}
+        FROM {src} t
+        JOIN _sel_sessions s ON t.session_id = s._session_id
+        {where_sql}
+        ORDER BY {', '.join(order)}
+    """).df()
