@@ -68,8 +68,7 @@ python -m aind_dynamic_foraging_database.build_cache \
 ```
 foraging_cache/
 ├── build_cache.py        # ENTRY POINT: build / incrementally extend the cache
-├── query_examples.py     # read-back ("return loop") DuckDB query patterns
-├── query_examples.ipynb  # notebook version of the queries
+├── query_examples.ipynb  # runnable DuckDB query examples
 ├── README.md             # querying guide (users / LLM context)
 ├── README_build.md       # this file
 └── util/
