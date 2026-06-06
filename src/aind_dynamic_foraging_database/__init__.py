@@ -16,7 +16,7 @@ optional ``[build]`` extra (NWB readers + ``aind-dynamic-foraging-data-utils``);
 **not** imported here, so importing this package to *query* stays lightweight.
 """
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 from aind_dynamic_foraging_database.query import (  # noqa: F401
     EVENT_DB,
