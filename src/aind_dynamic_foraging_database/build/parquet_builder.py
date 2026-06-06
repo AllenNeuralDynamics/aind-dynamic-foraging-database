@@ -21,7 +21,7 @@ NWB reader strategy (try-new-then-fallback):
      malformed bpod_backup_BehavioralEvents in many old bpod files)
 
 Usage (small-scale test):
-    from aind_dynamic_foraging_database.util import parquet_builder
+    from aind_dynamic_foraging_database.build import parquet_builder
 
     df_sess = parquet_builder.build_session_table(
         output_path="/tmp/foraging_cache/session_table.parquet",
@@ -49,7 +49,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import s3fs
 
-from aind_dynamic_foraging_database.util import postprocess
+from aind_dynamic_foraging_database.build import postprocess
 
 logger = logging.getLogger(__name__)
 
@@ -765,11 +765,11 @@ def _read_session_with_fallback(nwb_path, nwb_data_source, session_id, legacy_fa
           "legacy_bonsai"        -- legacy reader on a Han bonsai NWB
           "legacy_bpod"          -- legacy reader on a Han bpod NWB
     """
-    from aind_dynamic_foraging_database.util import (
+    from aind_dynamic_foraging_database.build import (
         nwb_reader_aind,
         nwb_reader_legacy,
     )
-    from aind_dynamic_foraging_database.util.nwb_reader_aind import (
+    from aind_dynamic_foraging_database.build.nwb_reader_aind import (
         AINDReaderQualityError,
     )
 

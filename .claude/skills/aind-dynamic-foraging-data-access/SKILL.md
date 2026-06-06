@@ -3,7 +3,7 @@ name: aind-dynamic-foraging-data-access
 description: >
   How to ACCESS AIND dynamic-foraging behavioral data (the
   aind-dynamic-foraging-database repo): the session / trial / event parquet
-  cache on public S3 and how to query it with DuckDB, the table schemas and
+  database on public S3 and how to query it with DuckDB, the table schemas and
   key/filter columns, the data sources (AIND Code Ocean assets + Han bonsai/bpod
   NWBs), and the NWB-reading functions (create_df_trials / create_df_events,
   han_pipeline.get_session_table). Use for questions about querying foraging
@@ -14,7 +14,7 @@ description: >
 # AIND Dynamic Foraging Data Access
 
 AIND dynamic-foraging behavior originates as per-session **NWB files**; for analysis, query the
-**parquet cache** built from them (see [Parquet Database](#parquet-database-the-primary-way-to-access-behavior)
+**parquet database** built from them (see [Parquet Database](#parquet-database-the-primary-way-to-access-behavior)
 below) rather than opening NWBs. The repo / package is `aind-dynamic-foraging-database`. Query it
 with the helpers in `aind_dynamic_foraging_database`
 (`select_sessions` → `fetch_trials`/`fetch_events`; DuckDB under the hood), and drop to native
@@ -59,7 +59,7 @@ Canonical key: `(subject_id, session_date, nwb_suffix)` as a 3-tuple.
 
 ## Parquet Database (the primary way to access behavior)
 
-A Hive-partitioned parquet cache of all dynamic-foraging behavior on a **public** S3 bucket (no
+A Hive-partitioned parquet database of all dynamic-foraging behavior on a **public** S3 bucket (no
 AWS credentials needed to read). **Authoritative, self-contained querying doc:**
 `README.md` — paste it into an LLM as context to generate queries; full schema +
 query patterns in `references/parquet-api.md`.
@@ -104,7 +104,7 @@ trials = fetch_trials(sel, columns=["animal_response", "earned_reward"])     # t
   curriculum runs Coupled Baiting in early stages → Uncoupled Baiting at STAGE_3→FINAL/GRADUATED).
   Filter `curriculum_name` for enrollment, `task` for what ran (~3.2k on-curriculum sessions differ).
 
-(To build/update the cache, see `build_cache.py` / `README_build.md` — not needed for analysis.)
+(To build/update the database, see `build/build_cache.py` / `README_build.md` — not needed for analysis.)
 
 ## Han Pipeline Architecture (background)
 

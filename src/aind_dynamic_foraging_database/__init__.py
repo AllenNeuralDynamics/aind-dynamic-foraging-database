@@ -11,9 +11,10 @@ native DuckDB SQL when you need more::
 The default read targets (``SESSION_DB`` / ``TRIAL_DB`` / ``EVENT_DB``) live on a public S3 bucket,
 so reading needs no AWS credentials.
 
-Building/extending the database lives in ``build_cache`` / ``util.parquet_builder`` and needs the
-optional ``[build]`` extra (NWB readers + ``aind-dynamic-foraging-data-utils``); it is intentionally
-**not** imported here, so importing this package to *query* stays lightweight.
+Building/extending the database lives in the ``build`` subpackage (``build.build_cache`` /
+``build.parquet_builder``) and needs the optional ``[build]`` extra (NWB readers +
+``aind-dynamic-foraging-data-utils``); it is intentionally **not** imported here, so importing
+this package to *query* stays lightweight.
 """
 
 __version__ = "0.0.3"

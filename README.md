@@ -66,9 +66,9 @@ pip install "aind-dynamic-foraging-database[build]"
 > (Streamlit) renders this same session table with rich plots and point-and-click filters —
 > a great way to find sessions/subjects before pulling their trials/events here.
 > *Caveat:* the app is built from **Han's pipeline** only, so the **~381 CO-only sessions** this
-> cache adds from the Code Ocean universe (all `nwb_data_source = 'co_asset'`, with NULL Han
+> database adds from the Code Ocean universe (all `nwb_data_source = 'co_asset'`, with NULL Han
 > metadata — find them via `WHERE foraging_eff IS NULL`) **do not appear in the app**, even though
-> their trials/events are fully in the cache.
+> their trials/events are fully in the database.
 
 > 🔧 **Building or extending the database?** See **[`README_build.md`](README_build.md)**.
 
@@ -156,7 +156,7 @@ duckdb.sql(f"""
 `read_trials()` / `read_events()` with no arguments return the full-table glob (correct for any
 query, but reads every subject's footer — slow; scope to subjects whenever you can).
 
-> All helpers query the public S3 cache by default. Pass `base=` (a local dir or another S3
+> All helpers query the public S3 database by default. Pass `base=` (a local dir or another S3
 > prefix) to any of them to query a different build.
 
 ---
@@ -233,7 +233,7 @@ joining to trials/events. The columns you'll filter on most:
 > `AIND`/`Janelia`, `bonsai`/`bpod`, `training`/`ephys`). `data_source` is their fine-grained
 > concatenation (e.g. `AIND_training_447_bonsai`) — usually too granular to filter on directly.
 > And **`data_source` ≠ `nwb_data_source`**: `nwb_data_source` (`co_asset`/`bonsai_s3`/`bpod_s3`)
-> is just *which NWB the cache built the row from*, not a science filter.
+> is just *which NWB the database built the row from*, not a science filter.
 >
 > **Curriculum "off" vs "missing":** off-curriculum sessions have the **string** `curriculum_name
 > = 'None'` (and `curriculum_version = 'None'`); the ~381 CO-only sessions absent from Han have
@@ -295,7 +295,7 @@ duckdb.sql(f"DESCRIBE SELECT * FROM {READ_EVENTS}").df()                        
 | `rig`, `trainer`, `PI` | VARCHAR | session metadata |
 | `weight_after`, `water_in_session_total` | DOUBLE | weight / water |
 | `logistic_*`, `abs(*_bias)` | DOUBLE | fitted logistic-regression model coefficients |
-| `nwb_data_source` | VARCHAR | `co_asset` \| `bonsai_s3` \| `bpod_s3` — which NWB the cache built the row from (not a science filter) |
+| `nwb_data_source` | VARCHAR | `co_asset` \| `bonsai_s3` \| `bpod_s3` — which NWB the database built the row from (not a science filter) |
 | `co_asset_id`, `co_s3_nwb_uri` | VARCHAR | Code Ocean asset id / NWB URI (NULL if none) |
 
 ### trial table (key columns; 103 total)
@@ -357,9 +357,9 @@ duckdb.sql(f"DESCRIBE SELECT * FROM {READ_EVENTS}").df()                        
   co_asset_id, co_s3_nwb_uri, nwb_data_source`); **all Han columns are NULL** (`task`,
   `institute`, `hardware`, `curriculum_*`, `foraging_eff`, `finished_trials`, every metric). So
   **any filter on a Han column silently excludes them** (NULL fails every comparison — they
-  "never return"). Their **trials/events are fully in the cache**, so reach them by
+  "never return"). Their **trials/events are fully in the database**, so reach them by
   `subject_id`/`session_id` (or isolate them with `WHERE foraging_eff IS NULL`). **We plan to
-  rebuild the session metric table directly from the cache** — recomputing these per-session
+  rebuild the session metric table directly from the database** — recomputing these per-session
   stats from the trial data (the single source of truth) — which will fill in the CO-only
   sessions and eventually supersede Han's pipeline as the source of session metadata.
 
@@ -461,7 +461,7 @@ duckdb.sql(f"""
 a DuckDB stats error.)
 
 Runnable versions of these (and an at-a-glance DB overview + a DuckDB primer) are in
-[`query_examples.ipynb`](query_examples.ipynb).
+[`query_examples.ipynb`](notebooks/query_examples.ipynb).
 
 ---
 
@@ -469,7 +469,7 @@ Runnable versions of these (and an at-a-glance DB overview + a DuckDB primer) ar
 
 Paste this README into your LLM as context, prefixed with something like:
 
-> *You write DuckDB SQL against the AIND dynamic-foraging parquet cache described below. Rules:
+> *You write DuckDB SQL against the AIND dynamic-foraging parquet database described below. Rules:
 > read the partitioned trial/event tables with `read_parquet('…/**/*.parquet',
 > hive_partitioning=true, union_by_name=true)`; `CAST(subject_id AS VARCHAR)` whenever you
 > filter or join `subject_id` on those tables; quote `subject_id`/`session_date` (strings);
@@ -540,7 +540,7 @@ chain with a single parquet scan:
 `nwb_utils` read (33/33 sessions exact-match — see `README_build.md`). Solid = the new database (measured),
 dashed = legacy `nwb_utils` (per-session cost, extrapolated):
 
-![Cache vs legacy nwb_utils fetch time](src/aind_dynamic_foraging_database/validate/cache_vs_legacy.png)
+![Cache vs legacy nwb_utils fetch time](src/aind_dynamic_foraging_database/build/validate/cache_vs_legacy.png)
 
 Memory scales with the columns you select (a few columns ≈ 10× less RAM than the full width);
 per-subject coalescing

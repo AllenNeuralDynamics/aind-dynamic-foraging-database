@@ -33,7 +33,7 @@ Run:
     python -m aind_dynamic_foraging_database.build_cache --limit 300
 
 Or drive it programmatically (the module is import-safe — nothing runs on import):
-    from aind_dynamic_foraging_database import build_cache as b
+    from aind_dynamic_foraging_database.build import build_cache as b
     b.main(b.Config(out_dir="/root/capsule/scratch/tmp/foraging_cache", limit=300))
 """
 
@@ -43,7 +43,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from aind_dynamic_foraging_database.util import parquet_builder
+from aind_dynamic_foraging_database.build import parquet_builder
 
 logger = logging.getLogger(__name__)
 
@@ -270,5 +270,10 @@ def _banner(title: str) -> None:
     print("=" * 60)
 
 
-if __name__ == "__main__":
+def _cli():
+    """Console-script entry point (``aind-df-build``): parse argv and run the build."""
     main(parse_args())
+
+
+if __name__ == "__main__":
+    _cli()

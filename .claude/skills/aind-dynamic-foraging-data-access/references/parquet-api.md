@@ -1,6 +1,6 @@
-# Foraging parquet cache — schema & query reference
+# Foraging parquet database — schema & query reference
 
-The cache is the **primary way to access** dynamic-foraging behavior. This file is a condensed
+The database is the **primary way to access** dynamic-foraging behavior. This file is a condensed
 schema + query reference; the **authoritative, self-contained doc is
 `src/aind_dynamic_foraging_database/README.md`** (paste it into an LLM as
 context to generate queries). It reads natively over S3 — the bucket is **public, no AWS
@@ -86,9 +86,9 @@ columns is ~seconds); `total_trials` excludes autowater; `subject_id`/`session_d
 grouping on `subject_id` also needs the `CAST`. See `README.md` for the full
 schema catalog, common filter columns, worked examples, and an LLM-ready preamble.
 
-## Reading a single NWB directly (bypassing the cache)
+## Reading a single NWB directly (bypassing the database)
 
 `nwb_utils.create_df_trials(nwb_path)` / `create_df_events(nwb_path)` parse one AIND-format NWB
 (local path or `s3://`); for Han bonsai/bpod NWBs use the legacy reader in
-`aind_dynamic_foraging_database/util/nwb_reader_legacy.py`. The cache is built from these readers — for analysis,
-query the cache instead (it's ~10,000× faster than opening NWBs one session at a time).
+`aind_dynamic_foraging_database/build/nwb_reader_legacy.py`. The database is built from these readers — for analysis,
+query the database instead (it's ~10,000× faster than opening NWBs one session at a time).

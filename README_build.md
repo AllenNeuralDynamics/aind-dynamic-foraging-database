@@ -5,7 +5,7 @@ dynamic-foraging behavioral data (one row per session / trial / event), assemble
 files across three sources.
 
 > **Just want to query an already-built database?** See **[`README.md`](README.md)** — it's the
-> user/LLM querying guide. This file is for building and maintaining the cache.
+> user/LLM querying guide. This file is for building and maintaining the database.
 
 ---
 
@@ -32,12 +32,13 @@ Building the **session table** additionally needs Han's pipeline package
 ## Quick start
 
 ```bash
-# Build / incrementally extend the production cache on S3 (recommended workers: 64)
-python -m aind_dynamic_foraging_database.build_cache \
+# Build / incrementally extend the production database on S3 (recommended workers: 64).
+# `aind-df-build` is a console-script alias for `python -m aind_dynamic_foraging_database.build.build_cache`.
+aind-df-build \
     --out-dir s3://aind-scratch-data/aind-dynamic-foraging-cache --n-workers 64
 
 # Quick local test on a random 1000-session subset (caches the docDB discovery)
-python -m aind_dynamic_foraging_database.build_cache \
+aind-df-build \
     --limit 1000 --n-workers 64 \
     --out-dir /root/capsule/scratch/tmp/foraging_cache \
     --co-cache /root/capsule/scratch/tmp/co_discovery.pkl
@@ -66,21 +67,23 @@ python -m aind_dynamic_foraging_database.build_cache \
 ## Module structure
 
 ```
-foraging_cache/
-├── build_cache.py        # ENTRY POINT: build / incrementally extend the cache
-├── query_examples.ipynb  # runnable DuckDB query examples
-├── README.md             # querying guide (users / LLM context)
-├── README_build.md       # this file
-└── util/
-    ├── parquet_builder.py    # session table (Han∪CO union) + trial/event build + routing
-    ├── nwb_reader_aind.py    # AIND reader wrapper (nwb_utils) → AINDReaderQualityError
-    ├── nwb_reader_legacy.py  # Han-pipeline reader (bonsai/bpod) + h5py fallback
-    └── postprocess.py        # per-subject coalescing + triage CSV log + CSV I/O
+aind_dynamic_foraging_database/          # the importable package (under src/)
+├── __init__.py            # exports the query surface (lightweight: duckdb + pandas)
+├── query.py               # QUERY: DuckDB helpers (select_sessions / fetch_* / read_*)
+└── build/                 # BUILD: needs the [build] extra (NWB readers + pipeline)
+    ├── build_cache.py         # ENTRY POINT: build / incrementally extend the database
+    ├── parquet_builder.py     # session table (Han∪CO union) + trial/event build + routing
+    ├── nwb_reader_aind.py     # AIND reader wrapper (nwb_utils) → AINDReaderQualityError
+    ├── nwb_reader_legacy.py   # Han-pipeline reader (bonsai/bpod) + h5py fallback
+    ├── postprocess.py         # per-subject coalescing + triage CSV log + CSV I/O
+    └── validate/              # end-to-end validation scripts (validate_step1/2 + plots)
+
+# querying guide: README.md (repo root) · build guide: README_build.md · notebook: notebooks/
 ```
 
 ---
 
-## How a build works (`build_cache.main`)
+## How a build works (`build.build_cache.main`)
 
 1. **Index local NWBs** — scan `/data/foraging_nwb_bonsai/` + `/data/foraging_nwb_bpod/`.
 2. **Build the session table** (`build_session_table`): union two universes (see below),
@@ -100,7 +103,7 @@ foraging_cache/
 - **docDB / Code Ocean universe** — every processed dynamic-foraging session
   (`get_dynamic_foraging_assets`). The complete CO set, which fills Han's gaps.
 
-We union them so the cache is complete and keeps working after Han's pipeline retires.
+We union them so the database is complete and keeps working after Han's pipeline retires.
 
 ### 2. docDB discovery query (`code_ocean_utils.get_dynamic_foraging_assets`)
 - Filters on the **task software name** (`session.*.software.name == "dynamic-foraging-task"`)
@@ -177,7 +180,7 @@ Queries then use `union_by_name=true` to merge any remaining per-reader column d
 
 ---
 
-## `build_cache` CLI reference
+## `aind-df-build` CLI reference
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -192,7 +195,7 @@ Incremental by default: re-running only processes sessions not already in `build
 
 ---
 
-## Build performance (measured on the full prod cache — ~23.6k sessions, 12.5M trials, S3)
+## Build performance (measured on the full prod database — ~23.6k sessions, 12.5M trials, S3)
 
 - **Build (full, 64 workers):** ~1 h, dominated by ~15k CO-asset S3 reads; incremental
   re-runs only touch new/unprocessed sessions (cheap). docDB discovery ≈ 137 s (cache it for
@@ -204,31 +207,31 @@ Incremental by default: re-running only processes sessions not already in `build
 
 ## Validation
 
-The cache was validated end-to-end against the legacy NWB read paths and Han's master
-session table. Scripts live in [`validate/`](validate/) (`validate_step1.py`,
+The database was validated end-to-end against the legacy NWB read paths and Han's master
+session table. Scripts live in [`build/validate/`](src/aind_dynamic_foraging_database/build/validate/) (`validate_step1.py`,
 `validate_step2.py`, `plot_validation.py`); artifacts write to `scratch/tmp/validation/`.
 
 **Step 1 — data equivalence + speed.** Sampling per source (co_asset / bonsai / bpod), the
-cache returns *exactly* the same trial data as a direct NWB read (**33/33 sessions exact
+database returns *exactly* the same trial data as a direct NWB read (**33/33 sessions exact
 match**: 5-col, full, and full+events). Fetch time is measured at every scale (median over
 repeated, re-sampled draws) against the TRUE legacy CO chain run serially —
 `get_subject_assets` (docDB query) → `add_s3_location` (S3 glob) → `nwb_utils.create_df_*`
 — which is extrapolated (~23 s/session, dominated by the ~17 s docDB query):
 
-| fetch | cache, full DB (~23.6k sessions) | legacy CO chain, full DB |
+| fetch | database, full DB (~23.6k sessions) | legacy CO chain, full DB |
 |---|---|---|
 | 5-column trials | **~3 s** | ~23 s/session → **~6 days** |
 | full 103-col trials | **~53 s** | ~23 s/session → ~6 days |
 | trials + events | ~64 s (at 10k) | ~27 s/session |
 
-→ the cache is **~10,000× faster**; it eliminates the per-session docDB query
+→ the database is **~10,000× faster**; it eliminates the per-session docDB query
 that dominates the legacy route.
 
-![Cache vs legacy fetch time](src/aind_dynamic_foraging_database/validate/cache_vs_legacy.png)
+![Cache vs legacy fetch time](src/aind_dynamic_foraging_database/build/validate/cache_vs_legacy.png)
 
 **Step 2 — apples-to-apples vs Han's master table.** Han's session stats are specific *sums
 over `df_trial`* (`process_nwbs.py`), and crucially Han's `total_trials` **excludes autowater
-trials**. Reproducing each Han definition from the cache trial table
+trials**. Reproducing each Han definition from the database trial table
 (`non_aw = auto_waterL==0 & auto_waterR==0`; `IGNORE=2`; left/right recovered from
 `bias_naive`+`finished_trials`), all metrics agree per-session:
 
@@ -241,12 +244,12 @@ trials**. Reproducing each Han definition from the cache trial table
 By source: **bpod 100%, bonsai 99.8%** (same NWBs as Han → true apples-to-apples);
 **co_asset 96.2%** is the only notable residual — those sessions read the AIND CO NWB while
 Han read the bonsai NWB (different files/pipelines), plus ~14 truncated CO assets. Han's
-pipeline trims no trials, so the cache reproduces Han's master table as a single source of
+pipeline trims no trials, so the database reproduces Han's master table as a single source of
 truth.
 
 The small fraction of per-session metric mismatches are most likely known **Han-pipeline**
 quirks (e.g. [aind-analysis-arch-result-access#26](https://github.com/AllenNeuralDynamics/aind-analysis-arch-result-access/issues/26)),
-not cache errors. They are rare, and the cache db is our intended single source of truth going
+not database errors. They are rare, and the database is our intended single source of truth going
 forward — so **we consider this validation passed**.
 
 ---
