@@ -461,7 +461,7 @@ duckdb.sql(f"""
 a DuckDB stats error.)
 
 Runnable versions of these (and an at-a-glance DB overview + a DuckDB primer) are in
-[`query_examples.ipynb`](query_examples.ipynb) / `query_examples.py`.
+[`query_examples.ipynb`](query_examples.ipynb).
 
 ---
 

@@ -73,7 +73,6 @@ fail-under = 100
 omit = [
     "*__init__*",
     "*/build_cache.py",
-    "*/query_examples.py",
     "*/util/parquet_builder.py",
     "*/util/nwb_reader_aind.py",
     "*/util/nwb_reader_legacy.py",
