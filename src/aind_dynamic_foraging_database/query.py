@@ -1,5 +1,5 @@
 """
-DuckDB query helpers for the foraging parquet cache.
+DuckDB query helpers for the foraging parquet database.
 
 Two layers — reach for the simple helpers first, drop to native SQL when you need more:
 
@@ -20,7 +20,7 @@ must read *every* subject file's footer to build the column union before it can 
 (~25 s cold). Scoping the read to just the subjects you asked for reads only their footers
 (~1 s), while still unioning their columns correctly.
 
-Everything reads the public S3 cache (no AWS credentials needed). To query a local build,
+Everything reads the public S3 database (no AWS credentials needed). To query a local build,
 pass ``base=`` (or reassign ``SESSION_DB`` / ``TRIAL_DB`` / ``EVENT_DB``).
 """
 
@@ -181,7 +181,7 @@ def select_sessions(where=None, subjects=None, columns=None, base=None, con=None
         ``_session_id, subject_id, session_date`` are always included as leading columns.
     base : str, optional
         Session table to read — the ``session_table.parquet`` **file** (default: the
-        production S3 cache). Pass a local file / other S3 path to query another build.
+        production S3 database). Pass a local file / other S3 path to query another build.
     con : duckdb connection, optional
         DuckDB connection to run on (default: the module connection). Pass your own for warm
         reuse across calls, or custom settings (S3 region/creds, threads, memory).

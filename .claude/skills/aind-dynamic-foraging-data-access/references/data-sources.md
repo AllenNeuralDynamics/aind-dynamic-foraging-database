@@ -98,7 +98,7 @@ results = get_assets(
 
 ## Which source each session's data comes from
 
-Each session in the cache is read from a single source (priority: CO asset > bonsai > bpod),
+Each session in the database is read from a single source (priority: CO asset > bonsai > bpod),
 recorded in the **`nwb_data_source`** column of every trial/event/session row:
   1. CO asset present  → `"co_asset"`  (AIND reader, `nwb_utils.create_df_trials`)
   2. else bonsai S3 NWB → `"bonsai_s3"` (legacy Han reader)

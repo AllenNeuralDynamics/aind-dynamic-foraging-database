@@ -15,7 +15,7 @@ import duckdb
 import pandas as pd
 
 from aind_dynamic_foraging_database import query
-from aind_dynamic_foraging_database.util import parquet_builder
+from aind_dynamic_foraging_database.build import parquet_builder
 
 TEST_NWB_DIR = "./tests/nwb"
 

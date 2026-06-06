@@ -43,6 +43,10 @@ dev = [
     "furo",
 ]
 
+[project.scripts]
+# Stable CLI name for the build pipeline, decoupled from the module path.
+aind-df-build = "aind_dynamic_foraging_database.build.build_cache:_cli"
+
 # Dev/CO only: pull the build's parent-side functions (get_dynamic_foraging_assets, ...) from the
 # han_DF_cache branch until they're released on PyPI (see the migration plan, "Track A").
 # Ignored by pip consumers and stripped from the published wheel metadata.
@@ -64,7 +68,7 @@ line_length = 100
 profile = "black"
 
 [tool.interrogate]
-exclude = ["docs", "build", "src/aind_dynamic_foraging_database/validate"]
+exclude = ["docs", "src/aind_dynamic_foraging_database/build/validate"]
 fail-under = 100
 
 [tool.coverage.run]
@@ -72,11 +76,11 @@ fail-under = 100
 # subprocesses). The query helpers and post-processing stay measured.
 omit = [
     "*__init__*",
-    "*/build_cache.py",
-    "*/util/parquet_builder.py",
-    "*/util/nwb_reader_aind.py",
-    "*/util/nwb_reader_legacy.py",
-    "*/validate/*",
+    "*/build/build_cache.py",
+    "*/build/parquet_builder.py",
+    "*/build/nwb_reader_aind.py",
+    "*/build/nwb_reader_legacy.py",
+    "*/build/validate/*",
 ]
 source = ["aind_dynamic_foraging_database", "tests"]
 
