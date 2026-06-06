@@ -223,6 +223,8 @@ def fetch_trials(sessions, columns=None, base=None, con=None):
     columns : list[str] or "*", optional
         Trial columns to project (default: a small choice/reward set). ``"*"`` returns all
         103 columns (large). Columns absent for the selected subjects come back all-NULL.
+        The within-session index ``trial`` is **always** included (you can't identify a trial
+        without it), so you never need to list it — it leads the projected columns.
     base : str, optional
         Trial-table **directory** prefix (default: the production S3 ``trial_table``). Pass a
         local dir / other S3 prefix to query another build.
@@ -233,11 +235,11 @@ def fetch_trials(sessions, columns=None, base=None, con=None):
     Returns
     -------
     pandas.DataFrame
-        One row per trial, leading ``subject_id, session_date, session_id``, ordered by
+        One row per trial, leading ``subject_id, session_date, session_id, trial``, ordered by
         ``subject_id, session_date, trial``.
     """
     return _fetch(sessions, base or TRIAL_DB, columns or DEFAULT_TRIAL_COLUMNS,
-                  con, order_tail="trial")
+                  con, order_tail="trial", lead="trial")
 
 
 def fetch_events(sessions, events=None, columns=None, base=None, con=None):
@@ -272,7 +274,7 @@ def fetch_events(sessions, events=None, columns=None, base=None, con=None):
                   con, order_tail="timestamps", extra_where=extra_where)
 
 
-def _fetch(sessions, base, columns, con, order_tail, extra_where=None):
+def _fetch(sessions, base, columns, con, order_tail, extra_where=None, lead=None):
     """Shared core for fetch_trials / fetch_events: scoped read + join to selected sessions.
 
     Runs optimistically — ``union_by_name`` already null-fills columns missing from *some* selected
@@ -289,27 +291,37 @@ def _fetch(sessions, base, columns, con, order_tail, extra_where=None):
     conn.register("_sel_sessions", sessions)
     try:
         try:
-            return _run_fetch(conn, src, sessions, columns, order_tail, extra_where, avail=None)
+            return _run_fetch(conn, src, sessions, columns, order_tail, extra_where, None, lead)
         except duckdb.BinderException:
             avail = set(conn.sql(f"DESCRIBE SELECT * FROM {src}").df()["column_name"])
-            return _run_fetch(conn, src, sessions, columns, order_tail, extra_where, avail=avail)
+            return _run_fetch(conn, src, sessions, columns, order_tail, extra_where, avail, lead)
     finally:
         conn.unregister("_sel_sessions")
 
 
-def _run_fetch(conn, src, sessions, columns, order_tail, extra_where, avail):
+def _col_expr(col, avail):
+    """Project trial/event column ``col``, null-padding (as DOUBLE) if absent from every file."""
+    return f"t.{col}" if (avail is None or col in avail) else f"CAST(NULL AS DOUBLE) AS {col}"
+
+
+def _run_fetch(conn, src, sessions, columns, order_tail, extra_where, avail, lead=None):
     """Build + run the scoped fetch query and join in the selected sessions' metadata.
 
     ``avail=None`` projects every requested column as-is (optimistic). A set of available columns
-    null-pads any that are missing and drops the sort key if it's absent.
+    null-pads any that are missing and drops the sort key if it's absent. ``lead`` (if given) is
+    always projected, right after the session keys and before the carried metadata — so e.g.
+    ``trial`` stays adjacent to the identity columns regardless of the requested ``columns``.
     """
     meta = [f"s.{c}" for c in sessions.columns if c not in ("_session_id", *_KEYS)]
+    lead_proj = [_col_expr(lead, avail)] if lead else []
     if columns in ("*", ["*"]):
-        proj = [f"t.* EXCLUDE ({', '.join(k for k in _KEYS if avail is None or k in avail)})"]
+        excl = [k for k in _KEYS if avail is None or k in avail]
+        if lead and (avail is None or lead in avail):
+            excl.append(lead)  # pulled to the front via lead_proj instead of left in t.*
+        proj = [f"t.* EXCLUDE ({', '.join(excl)})"]
     else:
-        proj = [f"t.{c}" if (avail is None or c in avail) else f"CAST(NULL AS DOUBLE) AS {c}"
-                for c in columns if c not in _KEYS]
-    select = ", ".join(["s.subject_id", "s.session_date", "t.session_id", *meta, *proj])
+        proj = [_col_expr(c, avail) for c in columns if c not in _KEYS and c != lead]
+    select = ", ".join(["s.subject_id", "s.session_date", "t.session_id", *lead_proj, *meta, *proj])
     where_sql = f"WHERE {extra_where}" if extra_where else ""
     order = ["s.subject_id", "s.session_date"]
     if avail is None or order_tail in avail:
