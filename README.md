@@ -490,15 +490,12 @@ want — no need to paste this README.
 
 ## Read performance (full database — ~24k sessions, 12.5M trials, over S3)
 
-> ⚙️ **These timings assume compute in `us-west-2` with several vCPUs (measured on 16).** Query
-> speed depends on cores, RAM, and especially S3 locality. Because these reads are mostly
-> **S3-I/O-bound**, a **1-vCPU (single-threaded)** capsule is only **~1.5–2× slower** for scans/joins
-> — *but* two other factors matter much more: with little RAM the join/sort can **spill to disk**
-> (much slower), and **cross-region** S3 (compute outside the bucket's `us-west-2`) is far slower
-> than either. Check yours with `import os; os.cpu_count()` and
-> `duckdb.sql("SELECT current_setting('threads') AS threads, current_setting('memory_limit') AS mem").df()`.
-> For whole-database / broad queries, prefer a capsule with **several vCPUs + RAM, in `us-west-2`**;
-> for everything else, **scope to subjects** (below) — fast even on a single core.
+> ⚙️ **These timings assume a well-resourced capsule in `us-west-2` (measured on 16 vCPUs).** Query
+> speed depends heavily on the capsule's vCPUs, RAM, and region — an under-resourced or cross-region
+> capsule can be **much slower** (fewer cores, RAM spilling to disk, slow cross-region S3). Check yours
+> with `os.cpu_count()` and `duckdb.sql("SELECT current_setting('threads'), current_setting('memory_limit')").df()`.
+> For broad / whole-database queries prefer a capsule with **several vCPUs + RAM, in `us-west-2`**;
+> otherwise **scope to subjects** (below).
 
 **Scope the read to the subjects you need** — this is what the helpers do, and it dominates
 selective-query latency:
