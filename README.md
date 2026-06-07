@@ -85,6 +85,18 @@ want — no need to paste this README.
 
 ---
 
+## Notebooks
+
+- [`query_examples.ipynb`](notebooks/query_examples.ipynb) — runnable versions of the query
+  patterns in this README, plus an at-a-glance DB overview and a DuckDB primer.
+- [`reproduce_figures.ipynb`](notebooks/reproduce_figures.ipynb) — how this database is a fast
+  drop-in for the old NWB-by-NWB workflow: it reproduces figures we used to generate that way
+  (session-count-over-time, single-session choice/reward rasters, and interactive plotly trial-
+  and time-based views, including a whole-mouse lifetime across sessions) — straight from the
+  parquet tables, in seconds instead of minutes-to-hours of per-file loading.
+
+---
+
 ## Quick start — the query helpers
 
 The helpers, importable from `aind_dynamic_foraging_database`, wrap DuckDB and return a
@@ -157,18 +169,6 @@ query, but reads every subject's footer — slow; scope to subjects whenever you
 
 > All helpers query the public S3 database by default. Pass `base=` (a local dir or another S3
 > prefix) to any of them to query a different build.
-
----
-
-## Notebooks
-
-- [`query_examples.ipynb`](notebooks/query_examples.ipynb) — runnable versions of the query
-  patterns in this README, plus an at-a-glance DB overview and a DuckDB primer.
-- [`reproduce_figures.ipynb`](notebooks/reproduce_figures.ipynb) — how this database is a fast
-  drop-in for the old NWB-by-NWB workflow: it reproduces figures we used to generate that way
-  (session-count-over-time, single-session choice/reward rasters, and interactive plotly trial-
-  and time-based views, including a whole-mouse lifetime across sessions) — straight from the
-  parquet tables, in seconds instead of minutes-to-hours of per-file loading.
 
 ---
 
