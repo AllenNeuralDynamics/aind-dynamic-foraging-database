@@ -172,14 +172,13 @@ query, but reads every subject's footer — slow; scope to subjects whenever you
 
 ---
 
-## Build or extend
-
-Install the `[build]` extra (see [Installation](#installation)) and follow
-[**`README_build.md`**](README_build.md) to (re)build the parquet tables from NWBs.
-
----
-
 ## Native SQL (what the helpers are built on)
+
+The table paths are importable:
+
+```python
+from aind_dynamic_foraging_database import SESSION_DB, TRIAL_DB, EVENT_DB
+```
 
 Everything below is the raw DuckDB layer. Use it directly when you want full control — or to
 understand what the helpers do under the hood. (You can still read the session table directly,
