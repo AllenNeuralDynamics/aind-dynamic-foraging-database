@@ -274,7 +274,7 @@ joining to trials/events. The columns you'll filter on most:
 
 ---
 
-## Schema catalog
+## Detailed schema
 
 Column types come straight from the files. To list **every** column of a table:
 
