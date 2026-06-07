@@ -43,54 +43,11 @@ pip install "aind-dynamic-foraging-database[build]"
 
 ---
 
-> 🚀 **Start with the query helpers** — importable from `aind_dynamic_foraging_database`,
-> they wrap DuckDB and hand back a pandas DataFrame:
-> - **`select_sessions(where=…, subjects=…, columns=…)`** — filter the (small) session table on any
->   metric / metadata (or a subject list); returns a DataFrame of the selected sessions.
-> - **`fetch_trials(sel, …)` / `fetch_events(sel, …)`** — pull those sessions' trials / events with the
->   session metadata joined onto every row, reading only the selected subjects' partitions (fast).
-> - **`read_trials(subjects)` / `read_events(subjects)`** — escape hatch: a fast, partition-scoped
->   `read_parquet(...)` clause to drop into any DuckDB SQL you write (aggregations, windows, joins).
->
-> See [**Quick start**](#quick-start--the-query-helpers) for runnable examples; drop to native SQL
-> only when the helpers don't cover what you need.
-
-> 💡 **Need custom DuckDB SQL? Let an LLM write it.** This README is self-contained: paste the
-> whole file into the LLM of your choice (Claude / ChatGPT / Cursor / …) as context, then ask
-> in plain English (e.g. *"trials for subjects 754372 and 758435 with foraging_eff > 0.8"*).
-> It will return runnable DuckDB that follows the conventions below — including the key
-> columns. See [**Use an LLM**](#use-an-llm-to-write-queries) for a copy-paste preamble — or, with
-> a coding agent (Claude Code / Codex / OpenCode), load the `aind-dynamic-foraging-data-access`
-> skill in `.claude/skills/` instead.
-
-> 📊 **Prefer to browse the session metadata visually?** The interactive
-> [**foraging behavior browser**](https://foraging-behavior-browser.allenneuraldynamics.org/)
-> (Streamlit) renders this same session table with rich plots and point-and-click filters —
-> a great way to find sessions/subjects before pulling their trials/events here.
-> *Caveat:* the app is built from **Han's pipeline** only, so the **~381 CO-only sessions** this
-> database adds from the Code Ocean universe (all `nwb_data_source = 'co_asset'`, with NULL Han
-> metadata — find them via `WHERE foraging_eff IS NULL`) **do not appear in the app**, even though
-> their trials/events are fully in the database.
-
-> 🔧 **Building or extending the database?** See **[`README_build.md`](README_build.md)**.
-
----
-
-## Notebooks
-
-- [`query_examples.ipynb`](notebooks/query_examples.ipynb) — runnable versions of the query
-  patterns in this README, plus an at-a-glance DB overview and a DuckDB primer.
-- [`reproduce_figures.ipynb`](notebooks/reproduce_figures.ipynb) — how this database is a fast
-  drop-in for the old NWB-by-NWB workflow: it reproduces figures we used to generate that way
-  (session-count-over-time, single-session choice/reward rasters, and interactive plotly trial-
-  and time-based views, including a whole-mouse lifetime across sessions) — straight from the
-  parquet tables, in seconds instead of minutes-to-hours of per-file loading.
-
----
-
 ## Use an LLM to write queries
 
-Paste this README into your LLM as context, prefixed with something like:
+**Start here — this database is built to be queried by an LLM.** It's self-contained: paste
+this README into the LLM of your choice (Claude / ChatGPT / Cursor / …) as context, prefixed
+with something like:
 
 > *You write DuckDB SQL against the AIND dynamic-foraging parquet database described below. Rules:
 > read the partitioned trial/event tables with `read_parquet('…/**/*.parquet',
@@ -101,7 +58,8 @@ Paste this README into your LLM as context, prefixed with something like:
 > session_date`; project only the columns asked for; filter by `subject_id` when possible.
 > Return a single runnable `duckdb.sql(...).df()` snippet. Schema and conventions follow:*
 
-Then ask your question in plain English.
+Then ask your question in plain English — you get back runnable DuckDB that already follows the
+conventions below.
 
 **Using a coding agent** (Claude Code, Codex, OpenCode, …)? This repo ships an
 **`aind-dynamic-foraging-data-access`** skill (in `.claude/skills/`) with exactly this context.
@@ -111,29 +69,17 @@ want — no need to paste this README.
 
 ---
 
-## The database
-
-Three tables on a **public** S3 bucket (`s3://aind-scratch-data/aind-dynamic-foraging-cache/`):
-
-| Table | Path | Grain | Size |
-|---|---|---|---|
-| **session** | `session_table.parquet` | one row per session | ~24k rows × 160 cols (~MB) |
-| **trial** | `trial_table/subject_id=<id>/…parquet` | one row per trial | ~12.5M rows × 103 cols (~21 GB) |
-| **event** | `event_table/subject_id=<id>/…parquet` | one row per behavioral event | ~117M rows × 10 cols (~9 events / trial) |
-
-The trial/event tables are **Hive-partitioned by `subject_id`** and coalesced to one file per
-subject. The bucket is **public — DuckDB reads `s3://` natively with no AWS credentials or
-setup** (httpfs auto-loads). Point at a local directory instead to query a local build.
-
-The paths are importable:
-
-```python
-from aind_dynamic_foraging_database import SESSION_DB, TRIAL_DB, EVENT_DB
-```
-
----
-
 ## Quick start — the query helpers
+
+The helpers, importable from `aind_dynamic_foraging_database`, wrap DuckDB and return a
+pandas DataFrame:
+
+- **`select_sessions(where=…, subjects=…, columns=…)`** — filter the (small) session table on
+  any metric / metadata (or a subject list); returns the selected sessions.
+- **`fetch_trials(sel, …)` / `fetch_events(sel, …)`** — pull those sessions' trials / events with
+  the session metadata joined on, reading only the selected subjects' partitions (fast).
+- **`read_trials(subjects)` / `read_events(subjects)`** — escape hatch: a fast, partition-scoped
+  `read_parquet(...)` clause to drop into any DuckDB SQL (aggregations, windows, joins).
 
 Reach for the helpers first. They do the fiddly, easy-to-get-wrong part (reading the right
 partition files, fast *and* correct) and hand back a pandas DataFrame. Drop to
@@ -198,11 +144,54 @@ query, but reads every subject's footer — slow; scope to subjects whenever you
 
 ---
 
+## The database
+
+Three tables on a **public** S3 bucket (`s3://aind-scratch-data/aind-dynamic-foraging-cache/`):
+
+| Table | Path | Grain | Size |
+|---|---|---|---|
+| **session** | `session_table.parquet` | one row per session | ~24k rows × 160 cols (~MB) |
+| **trial** | `trial_table/subject_id=<id>/…parquet` | one row per trial | ~12.5M rows × 103 cols (~21 GB) |
+| **event** | `event_table/subject_id=<id>/…parquet` | one row per behavioral event | ~117M rows × 10 cols (~9 events / trial) |
+
+The trial/event tables are **Hive-partitioned by `subject_id`** and coalesced to one file per
+subject. The bucket is **public — DuckDB reads `s3://` natively with no AWS credentials or
+setup** (httpfs auto-loads). Point at a local directory instead to query a local build.
+
+The paths are importable:
+
+```python
+from aind_dynamic_foraging_database import SESSION_DB, TRIAL_DB, EVENT_DB
+```
+
+---
+
+## Notebooks
+
+- [`query_examples.ipynb`](notebooks/query_examples.ipynb) — runnable versions of the query
+  patterns in this README, plus an at-a-glance DB overview and a DuckDB primer.
+- [`reproduce_figures.ipynb`](notebooks/reproduce_figures.ipynb) — how this database is a fast
+  drop-in for the old NWB-by-NWB workflow: it reproduces figures we used to generate that way
+  (session-count-over-time, single-session choice/reward rasters, and interactive plotly trial-
+  and time-based views, including a whole-mouse lifetime across sessions) — straight from the
+  parquet tables, in seconds instead of minutes-to-hours of per-file loading.
+
+---
+
+## Build or extend
+
+Install the `[build]` extra (see [Installation](#installation)) and follow
+[**`README_build.md`**](README_build.md) to (re)build the parquet tables from NWBs.
+
+---
+
 ## Native SQL (what the helpers are built on)
 
 Everything below is the raw DuckDB layer. Use it directly when you want full control — or to
 understand what the helpers do under the hood. (You can still read the session table directly,
 e.g. `duckdb.sql(f"SELECT COUNT(*) FROM read_parquet('{SESSION_DB}') WHERE subject_id = '754372'")`.)
+
+---
 
 ## The three read options (always use these on the partitioned tables)
 
@@ -497,6 +486,8 @@ duckdb.sql(f"""
 (Cast `subject_id` in the `GROUP BY` too — grouping on the raw BIGINT partition column can hit
 a DuckDB stats error.)
 
+---
+
 ## Read performance (full database — ~24k sessions, 12.5M trials, over S3)
 
 > ⚙️ **These timings assume a well-resourced capsule in `us-west-2` (measured on 16 vCPUs).** Query
@@ -555,3 +546,5 @@ Memory scales with the columns you select (a few columns ≈ 10× less RAM than 
 per-subject coalescing
 keeps file-open overhead small even for full-width loads. See [`README_build.md`](README_build.md)
 for build performance and the full validation results (data-equivalence + apples-to-apples vs Han).
+
+---
