@@ -12,11 +12,11 @@ session / trial / event, unified into one **parquet database** on a public S3 bu
 mice / sessions, or the whole dataset, in **seconds** with a few Python calls (DuckDB + pandas) —
 instead of opening thousands of NWBs.
 
+## The database
+
 > **~24k sessions · 12.5M trials · 117M events** — the *complete* dataset, [**~10,000× faster**](#vs-the-legacy-nwb_utils-route) to
 > query. (Per Po-Chen's test, reading data directly from NWBs via `aind-dynamic-foraging-data-utils`
 > took **~6 days and reached only ~12k sessions** — about half.)
-
-## The database
 
 Three tables on a **public** S3 bucket (`s3://aind-scratch-data/aind-dynamic-foraging-cache/`):
 
@@ -29,12 +29,6 @@ Three tables on a **public** S3 bucket (`s3://aind-scratch-data/aind-dynamic-for
 The trial/event tables are **Hive-partitioned by `subject_id`** and coalesced to one file per
 subject. The bucket is **public — DuckDB reads `s3://` natively with no AWS credentials or
 setup** (httpfs auto-loads). Point at a local directory instead to query a local build.
-
-The paths are importable:
-
-```python
-from aind_dynamic_foraging_database import SESSION_DB, TRIAL_DB, EVENT_DB
-```
 
 ---
 
