@@ -184,9 +184,7 @@ Everything below is the raw DuckDB layer. Use it directly when you want full con
 understand what the helpers do under the hood. (You can still read the session table directly,
 e.g. `duckdb.sql(f"SELECT COUNT(*) FROM read_parquet('{SESSION_DB}') WHERE subject_id = '754372'")`.)
 
----
-
-## The three read options (always use these on the partitioned tables)
+### The three read options (always use these on the partitioned tables)
 
 ```python
 READ_TRIALS = f"read_parquet('{TRIAL_DB}/**/*.parquet', hive_partitioning=true, union_by_name=true)"
