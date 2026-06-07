@@ -463,6 +463,12 @@ a DuckDB stats error.)
 Runnable versions of these (and an at-a-glance DB overview + a DuckDB primer) are in
 [`query_examples.ipynb`](notebooks/query_examples.ipynb).
 
+[`reproduce_figures.ipynb`](notebooks/reproduce_figures.ipynb) shows how this database is a
+fast drop-in for the old NWB-by-NWB workflow: it reproduces figures we used to generate that
+way — session-count-over-time, single-session choice/reward rasters, and interactive plotly
+trial- and time-based views (including a whole-mouse lifetime across sessions) — straight from
+the parquet tables, in seconds instead of minutes-to-hours of per-file loading.
+
 ---
 
 ## Use an LLM to write queries
