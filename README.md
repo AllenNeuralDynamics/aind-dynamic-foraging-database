@@ -16,6 +16,28 @@ instead of opening thousands of NWBs.
 > query. (Per Po-Chen's test, reading data directly from NWBs via `aind-dynamic-foraging-data-utils`
 > took **~6 days and reached only ~12k sessions** — about half.)
 
+## The database
+
+Three tables on a **public** S3 bucket (`s3://aind-scratch-data/aind-dynamic-foraging-cache/`):
+
+| Table | Path | Grain | Size |
+|---|---|---|---|
+| **session** | `session_table.parquet` | one row per session | ~24k rows × 160 cols (~MB) |
+| **trial** | `trial_table/subject_id=<id>/…parquet` | one row per trial | ~12.5M rows × 103 cols (~21 GB) |
+| **event** | `event_table/subject_id=<id>/…parquet` | one row per behavioral event | ~117M rows × 10 cols (~9 events / trial) |
+
+The trial/event tables are **Hive-partitioned by `subject_id`** and coalesced to one file per
+subject. The bucket is **public — DuckDB reads `s3://` natively with no AWS credentials or
+setup** (httpfs auto-loads). Point at a local directory instead to query a local build.
+
+The paths are importable:
+
+```python
+from aind_dynamic_foraging_database import SESSION_DB, TRIAL_DB, EVENT_DB
+```
+
+---
+
 ## Installation
 
 Querying is lightweight — just `duckdb` + `pandas`:
@@ -141,28 +163,6 @@ query, but reads every subject's footer — slow; scope to subjects whenever you
 
 > All helpers query the public S3 database by default. Pass `base=` (a local dir or another S3
 > prefix) to any of them to query a different build.
-
----
-
-## The database
-
-Three tables on a **public** S3 bucket (`s3://aind-scratch-data/aind-dynamic-foraging-cache/`):
-
-| Table | Path | Grain | Size |
-|---|---|---|---|
-| **session** | `session_table.parquet` | one row per session | ~24k rows × 160 cols (~MB) |
-| **trial** | `trial_table/subject_id=<id>/…parquet` | one row per trial | ~12.5M rows × 103 cols (~21 GB) |
-| **event** | `event_table/subject_id=<id>/…parquet` | one row per behavioral event | ~117M rows × 10 cols (~9 events / trial) |
-
-The trial/event tables are **Hive-partitioned by `subject_id`** and coalesced to one file per
-subject. The bucket is **public — DuckDB reads `s3://` natively with no AWS credentials or
-setup** (httpfs auto-loads). Point at a local directory instead to query a local build.
-
-The paths are importable:
-
-```python
-from aind_dynamic_foraging_database import SESSION_DB, TRIAL_DB, EVENT_DB
-```
 
 ---
 
