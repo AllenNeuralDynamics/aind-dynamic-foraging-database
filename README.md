@@ -22,6 +22,7 @@ Querying is lightweight — just `duckdb` + `pandas`:
 
 ```bash
 uv add aind-dynamic-foraging-database     # uv (recommended)
+# or
 pip install aind-dynamic-foraging-database
 ```
 
@@ -36,6 +37,7 @@ To **build or extend** the database from NWBs, install the `build` extra (adds t
 
 ```bash
 uv add "aind-dynamic-foraging-database[build]"
+# or
 pip install "aind-dynamic-foraging-database[build]"
 ```
 
@@ -71,6 +73,41 @@ pip install "aind-dynamic-foraging-database[build]"
 > their trials/events are fully in the database.
 
 > 🔧 **Building or extending the database?** See **[`README_build.md`](README_build.md)**.
+
+---
+
+## Notebooks
+
+- [`query_examples.ipynb`](notebooks/query_examples.ipynb) — runnable versions of the query
+  patterns in this README, plus an at-a-glance DB overview and a DuckDB primer.
+- [`reproduce_figures.ipynb`](notebooks/reproduce_figures.ipynb) — how this database is a fast
+  drop-in for the old NWB-by-NWB workflow: it reproduces figures we used to generate that way
+  (session-count-over-time, single-session choice/reward rasters, and interactive plotly trial-
+  and time-based views, including a whole-mouse lifetime across sessions) — straight from the
+  parquet tables, in seconds instead of minutes-to-hours of per-file loading.
+
+---
+
+## Use an LLM to write queries
+
+Paste this README into your LLM as context, prefixed with something like:
+
+> *You write DuckDB SQL against the AIND dynamic-foraging parquet database described below. Rules:
+> read the partitioned trial/event tables with `read_parquet('…/**/*.parquet',
+> hive_partitioning=true, union_by_name=true)`; `CAST(subject_id AS VARCHAR)` whenever you
+> filter or join `subject_id` on those tables; quote `subject_id`/`session_date` (strings);
+> the session key is `_session_id` (session table) ↔ `session_id` (trial/event); always SELECT
+> `subject_id, session_date, session_id` as the leading columns and `ORDER BY subject_id,
+> session_date`; project only the columns asked for; filter by `subject_id` when possible.
+> Return a single runnable `duckdb.sql(...).df()` snippet. Schema and conventions follow:*
+
+Then ask your question in plain English.
+
+**Using a coding agent** (Claude Code, Codex, OpenCode, …)? This repo ships an
+**`aind-dynamic-foraging-data-access`** skill (in `.claude/skills/`) with exactly this context.
+With Claude Code it loads automatically when you work in the repo; for other agents, point them
+at `.claude/skills/aind-dynamic-foraging-data-access/SKILL.md`. Then just ask for the data you
+want — no need to paste this README.
 
 ---
 
@@ -459,40 +496,6 @@ duckdb.sql(f"""
 ```
 (Cast `subject_id` in the `GROUP BY` too — grouping on the raw BIGINT partition column can hit
 a DuckDB stats error.)
-
-Runnable versions of these (and an at-a-glance DB overview + a DuckDB primer) are in
-[`query_examples.ipynb`](notebooks/query_examples.ipynb).
-
-[`reproduce_figures.ipynb`](notebooks/reproduce_figures.ipynb) shows how this database is a
-fast drop-in for the old NWB-by-NWB workflow: it reproduces figures we used to generate that
-way — session-count-over-time, single-session choice/reward rasters, and interactive plotly
-trial- and time-based views (including a whole-mouse lifetime across sessions) — straight from
-the parquet tables, in seconds instead of minutes-to-hours of per-file loading.
-
----
-
-## Use an LLM to write queries
-
-Paste this README into your LLM as context, prefixed with something like:
-
-> *You write DuckDB SQL against the AIND dynamic-foraging parquet database described below. Rules:
-> read the partitioned trial/event tables with `read_parquet('…/**/*.parquet',
-> hive_partitioning=true, union_by_name=true)`; `CAST(subject_id AS VARCHAR)` whenever you
-> filter or join `subject_id` on those tables; quote `subject_id`/`session_date` (strings);
-> the session key is `_session_id` (session table) ↔ `session_id` (trial/event); always SELECT
-> `subject_id, session_date, session_id` as the leading columns and `ORDER BY subject_id,
-> session_date`; project only the columns asked for; filter by `subject_id` when possible.
-> Return a single runnable `duckdb.sql(...).df()` snippet. Schema and conventions follow:*
-
-Then ask your question in plain English.
-
-**Using a coding agent** (Claude Code, Codex, OpenCode, …)? This repo ships an
-**`aind-dynamic-foraging-data-access`** skill (in `.claude/skills/`) with exactly this context.
-With Claude Code it loads automatically when you work in the repo; for other agents, point them
-at `.claude/skills/aind-dynamic-foraging-data-access/SKILL.md`. Then just ask for the data you
-want — no need to paste this README.
-
----
 
 ## Read performance (full database — ~24k sessions, 12.5M trials, over S3)
 
