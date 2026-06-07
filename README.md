@@ -34,7 +34,7 @@ setup** (httpfs auto-loads). Point at a local directory instead to query a local
 
 ## Installation
 
-Querying is lightweight — just `duckdb` + `pandas`:
+Install the package — it's lightweight, with only `duckdb` + `pandas` as dependencies:
 
 ```bash
 uv add aind-dynamic-foraging-database     # uv (recommended)
