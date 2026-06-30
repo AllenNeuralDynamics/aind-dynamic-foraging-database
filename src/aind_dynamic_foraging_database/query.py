@@ -188,7 +188,7 @@ def status(prefix=None, con=None, verbose=True):
 
 
 def _list_snapshots(prefix, con):
-    """Dated snapshot ids under ``<prefix>/snapshots/`` (those with a session table), newest first."""
+    """Dated snapshot ids under ``<prefix>/snapshots/`` (with a session table), newest first."""
     try:
         rows = con.sql(
             f"SELECT file FROM glob('{prefix}/snapshots/*/session_table.parquet')").df()
@@ -226,7 +226,7 @@ def _db_status(name, base, con):
 
 
 def _last_build_time(base, con):
-    """Finish time of the most recent run in ``build_history.json`` under ``base`` (None if absent)."""
+    """Finish time of the latest run in ``build_history.json`` under ``base`` (None if absent)."""
     try:
         row = con.sql(
             f"SELECT MAX(finished_at) AS t FROM read_json_auto('{base}/build_history.json')").df()
