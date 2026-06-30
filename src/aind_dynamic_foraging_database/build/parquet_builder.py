@@ -1201,3 +1201,17 @@ def _read_json(path):
     else:
         with open(path, "r") as f:
             return json.load(f)
+
+
+def _write_text(text, path):
+    """Write a string to a local path or S3 URI."""
+    if path.startswith("s3://"):
+        fs = s3fs.S3FileSystem(anon=False)
+        with fs.open(path[len("s3://") :], "w") as f:
+            f.write(text)
+    else:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)

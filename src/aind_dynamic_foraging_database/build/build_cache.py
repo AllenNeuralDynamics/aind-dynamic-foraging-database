@@ -38,11 +38,16 @@ Or drive it programmatically (the module is import-safe — nothing runs on impo
 """
 
 import argparse
+import contextlib
+import io
 import logging
 import os
+import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
+from aind_dynamic_foraging_database import __version__
 from aind_dynamic_foraging_database.build import parquet_builder
 
 logger = logging.getLogger(__name__)
@@ -93,6 +98,16 @@ class Config:
     def log_csv(self) -> str:
         """Path to the human-readable per-session triage log CSV."""
         return f"{self.out_dir}/processing_log.csv"
+
+    @property
+    def history_out(self) -> str:
+        """Path to the append-only build-history JSON (one entry per build run)."""
+        return f"{self.out_dir}/build_history.json"
+
+    @property
+    def logs_dir(self) -> str:
+        """Directory holding the raw per-build log files (``logs/<build_id>.log``)."""
+        return f"{self.out_dir}/logs"
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +241,12 @@ def update_database(n_workers: Optional[int] = 64, **kwargs) -> dict:
 
 
 def main(cfg: Config) -> dict:
-    """Run the full build pipeline end to end. Returns the build summary."""
+    """Run the full build pipeline end to end, recording build history + a raw log.
+
+    Each run appends one entry to ``build_history.json`` (an append-only ledger of every
+    build/append event) and writes the run's raw console+warning log to ``logs/<build_id>.log``,
+    both under ``out_dir`` — so they travel with the data into any snapshot. Returns the summary.
+    """
     logging.basicConfig(
         level=logging.WARNING,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -238,6 +258,29 @@ def main(cfg: Config) -> dict:
     if not cfg.is_s3:
         os.makedirs(cfg.out_dir, exist_ok=True)
 
+    build_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    started = datetime.now(timezone.utc)
+    summary = None
+    status, error = "ok", None
+    buf = io.StringIO()
+    try:
+        with _capture_run_log(buf):
+            print(f"build_id: {build_id}   code version: {__version__}")
+            summary = _run_pipeline(cfg)
+    except Exception as exc:  # noqa: BLE001 - record the failure in history/log, then re-raise
+        import traceback
+
+        status, error = "error", str(exc)
+        traceback.print_exc(file=buf)
+        raise
+    finally:
+        finished = datetime.now(timezone.utc)
+        _record_build(cfg, build_id, started, finished, summary, status, error, buf.getvalue())
+    return summary
+
+
+def _run_pipeline(cfg: Config) -> dict:
+    """Index NWBs, build the session table, then the trial/event tables. Returns the summary."""
     _banner("Indexing local Han NWB files")
     nwb_index = parquet_builder.build_nwb_file_index()
     print(f"  Total NWB files indexed: {len(nwb_index)}")
@@ -250,6 +293,91 @@ def main(cfg: Config) -> dict:
     summary = build_trial_event_tables(cfg, session_df, nwb_index)
     print_summary(cfg, summary)
     return summary
+
+
+class _Tee:
+    """A minimal write-through stream that forwards writes/flushes to several streams."""
+
+    def __init__(self, *streams):
+        """Store the target streams to forward to."""
+        self._streams = streams
+
+    def write(self, s):
+        """Write ``s`` to every target stream."""
+        for st in self._streams:
+            st.write(s)
+        return len(s)
+
+    def flush(self):
+        """Flush every target stream."""
+        for st in self._streams:
+            st.flush()
+
+
+@contextlib.contextmanager
+def _capture_run_log(buf):
+    """Tee stdout and WARNING+ logging into ``buf`` while keeping live console output."""
+    handler = logging.StreamHandler(buf)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        with contextlib.redirect_stdout(_Tee(sys.stdout, buf)):
+            yield
+    finally:
+        root.removeHandler(handler)
+
+
+def _record_build(cfg, build_id, started, finished, summary, status, error, log_text) -> None:
+    """Append a build-history entry and write the raw run log (best-effort; never fails a build)."""
+    event = {
+        "build_id": build_id,
+        "started_at": started.isoformat(timespec="seconds"),
+        "finished_at": finished.isoformat(timespec="seconds"),
+        "duration_s": round((finished - started).total_seconds(), 1),
+        "status": status,
+        "code_version": __version__,
+        "out_dir": cfg.out_dir,
+        "incremental": not cfg.full_rebuild,
+        "limit": cfg.limit,
+        "n_workers": cfg.n_workers,
+    }
+    if summary is not None:
+        event.update({
+            "n_processed": summary["n_processed"],
+            "n_skipped": summary["n_skipped"],
+            "n_failed": summary["n_failed"],
+            "source_breakdown": {
+                "co_asset": summary["n_co_asset"],
+                "bonsai_s3": summary["n_bonsai_s3"],
+                "bpod_s3": summary["n_bpod_s3"],
+            },
+            "reader_breakdown": {
+                "aind": summary["n_aind_reader"],
+                "aind_fallback_legacy": summary["n_aind_fallback_legacy"],
+                "legacy_bonsai": summary["n_legacy_bonsai"],
+                "legacy_bpod": summary["n_legacy_bpod"],
+            },
+        })
+    if error is not None:
+        event["error"] = error
+    try:
+        _append_build_history(cfg.history_out, event)
+        parquet_builder._write_text(log_text, f"{cfg.logs_dir}/{build_id}.log")
+    except Exception as exc:  # noqa: BLE001 - logging must never sink the build itself
+        logger.warning("failed to write build history/log: %s", exc)
+
+
+def _append_build_history(path, event) -> None:
+    """Append ``event`` to the JSON-array build-history file (read-modify-write; absent is ok)."""
+    try:
+        history = parquet_builder._read_json(path)
+        if not isinstance(history, list):
+            history = []
+    except FileNotFoundError:
+        history = []
+    history.append(event)
+    parquet_builder._write_json(history, path)
 
 
 def parse_args(argv=None) -> Config:
