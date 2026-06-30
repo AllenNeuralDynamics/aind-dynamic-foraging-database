@@ -202,6 +202,29 @@ def print_summary(cfg: Config, summary: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+def update_database(n_workers: Optional[int] = 64, **kwargs) -> dict:
+    """Incrementally update the production S3 database from all sources, in one call.
+
+    Thin wrapper over :func:`main` pinned to the production prefix. Incremental by default
+    (only sessions not already in ``build_metadata.json`` are processed) and covers all three
+    sources (CO asset, bonsai S3, bpod S3) in one pass. Pair with
+    :func:`aind_dynamic_foraging_database.build.snapshot.create_snapshot` to freeze the result.
+
+    Parameters
+    ----------
+    n_workers : int, optional
+        Worker processes (default: 64; see :class:`Config`).
+    **kwargs
+        Extra :class:`Config` fields (e.g. ``full_rebuild=True``, ``limit=300``).
+
+    Returns
+    -------
+    dict
+        The build summary (see :func:`print_summary`).
+    """
+    return main(Config(out_dir=PROD_S3_OUT_DIR, n_workers=n_workers, **kwargs))
+
+
 def main(cfg: Config) -> dict:
     """Run the full build pipeline end to end. Returns the build summary."""
     logging.basicConfig(
