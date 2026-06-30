@@ -206,6 +206,20 @@ update_database(n_workers=64)        # optional: incremental update from all sou
 create_snapshot("20260604")          # freeze the current state (defaults to today, UTC)
 ```
 
+### Provenance & build history
+
+Each build records its own provenance under the database prefix, so every snapshot carries it too:
+
+- **`build_history.json`** — append-only ledger, one entry per build/append run: `build_id`
+  (UTC timestamp), start/finish, duration, status, `code_version`, processed/skipped/failed counts,
+  and source/reader breakdowns.
+- **`logs/<build_id>.log`** — the raw console + warning log of that run (per-session triage, failures).
+- **`processing_log.csv`** / **`build_metadata.json`** — per-session triage state and the incremental
+  processed-set.
+- **`snapshot_manifest.json`** (written into each snapshot) — `snapshot_date`, `created_at_utc`,
+  `source_prefix`, `latest_build_id`, `n_sessions`: what the snapshot is, when it was cut, and which
+  build produced it.
+
 ---
 
 ## Native SQL (what the helpers are built on)
