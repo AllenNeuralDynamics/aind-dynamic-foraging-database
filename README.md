@@ -99,6 +99,40 @@ want — no need to paste this README.
 
 ## Quick start — the query helpers
 
+**What's in the database?** `db.status()` prints the live (latest) database and every
+[snapshot](#snapshots-reproducible--pinned-data-sources) side by side — when each was last built,
+its most recent behavior session, how many sessions / subjects it holds, and the per-source
+breakdown — and returns the same as a DataFrame:
+
+```python
+import aind_dynamic_foraging_database as db
+
+db.status()
+```
+
+```text
+Foraging database @ s3://aind-scratch-data/aind-dynamic-foraging-cache
+
+  live (latest)
+    last build       : 2026-06-30 19:48:07
+    last session date: 2026-06-29
+    sessions/subjects: 24220 sessions, 913 subjects
+    sources          : co_asset=16129, bpod_s3=4297, bonsai_s3=3794
+
+  snapshot 20260603
+    last build       : 2026-06-30 06:37:27
+    last session date: 2026-06-03
+    sessions/subjects: 23868 sessions, 902 subjects
+    sources          : co_asset=15808, bpod_s3=4297, bonsai_s3=3763
+
+Access:
+  import aind_dynamic_foraging_database as db
+  db.select_sessions("foraging_eff > 0.8")        # live (latest) database
+  db.use_snapshot("20260603")                  # pin every read to a snapshot
+  db.select_sessions("foraging_eff > 0.8", snapshot="20260603")   # or per-call
+  db.use_snapshot(None)                           # back to live
+```
+
 The helpers, importable from `aind_dynamic_foraging_database`, wrap DuckDB and return a
 pandas DataFrame:
 
@@ -179,34 +213,8 @@ recent build. When you need a **frozen, reproducible** data source — e.g. to f
 for a model run — read from a dated **snapshot** instead: an immutable copy of the whole database
 (all tables + logs) under `…/snapshots/<YYYYMMDD>/`.
 
-**See what's available** — `db.status()` reports the live (latest) database and every snapshot
-side by side: when each was last built, its most recent behavior session, how many sessions /
-subjects it holds, and the per-source breakdown (it prints this and returns it as a DataFrame):
-
-```python
-import aind_dynamic_foraging_database as db
-
-db.status()
-# Foraging database @ s3://aind-scratch-data/aind-dynamic-foraging-cache
-#
-#   live (latest)
-#     last build       : 2026-06-30 19:48:07
-#     last session date: 2026-06-29
-#     sessions/subjects: 24220 sessions, 913 subjects
-#     sources          : co_asset=16129, bpod_s3=4297, bonsai_s3=3794
-#
-#   snapshot 20260603
-#     last build       : 2026-06-30 06:37:27
-#     last session date: 2026-06-03
-#     sessions/subjects: 23868 sessions, 902 subjects
-#     sources          : co_asset=15808, bpod_s3=4297, bonsai_s3=3763
-#
-# Access:
-#   import aind_dynamic_foraging_database as db
-#   db.select_sessions("foraging_eff > 0.8")        # live (latest) database
-#   db.use_snapshot("20260603")                  # pin every read to a snapshot
-#   ...
-```
+Use [`db.status()`](#quick-start--the-query-helpers) to list the live database and every
+available snapshot (with counts, dates, and sources).
 
 Pin a snapshot globally (all subsequent reads use it), or per call:
 
