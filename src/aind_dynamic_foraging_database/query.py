@@ -109,6 +109,45 @@ def _resolve_base(base, snapshot, kind):
     return f"{PROD_S3_PREFIX}/snapshots/{snap}/{_TABLE_SUFFIX[kind]}"
 
 
+# Snapshot-aware path accessors — the snapshot-respecting counterparts of the static
+# SESSION_DB / TRIAL_DB / EVENT_DB constants, for writing raw DuckDB SQL by hand. The
+# constants always point at the latest database; these honour use_snapshot / snapshot=.
+
+
+def session_db(snapshot=_UNSET):
+    """Session-table path (``session_table.parquet``), honouring the selected snapshot.
+
+    The snapshot-aware counterpart of :data:`SESSION_DB`, for raw SQL::
+
+        duckdb.sql(f"SELECT * FROM read_parquet('{session_db()}') WHERE foraging_eff > 0.8")
+
+    Returns the latest path by default, or ``snapshots/<date>/session_table.parquet`` when a
+    snapshot is pinned via :func:`use_snapshot`. Pass ``snapshot="20260604"`` to target one
+    directly, or ``snapshot=None`` to force latest regardless of the global.
+    """
+    return _resolve_base(None, snapshot, "session")
+
+
+def trial_db(snapshot=_UNSET):
+    """Trial-table directory prefix, honouring the selected snapshot.
+
+    The snapshot-aware counterpart of :data:`TRIAL_DB` (see :func:`session_db`). Use it as the
+    base of a partitioned read::
+
+        duckdb.sql(f"SELECT * FROM read_parquet('{trial_db()}/**/*.parquet', "
+                   f"hive_partitioning=true, union_by_name=true)")
+    """
+    return _resolve_base(None, snapshot, "trial")
+
+
+def event_db(snapshot=_UNSET):
+    """Event-table directory prefix, honouring the selected snapshot.
+
+    The snapshot-aware counterpart of :data:`EVENT_DB` (see :func:`session_db` / :func:`trial_db`).
+    """
+    return _resolve_base(None, snapshot, "event")
+
+
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------

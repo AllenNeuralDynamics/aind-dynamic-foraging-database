@@ -220,6 +220,19 @@ Everything below is the raw DuckDB layer. Use it directly when you want full con
 understand what the helpers do under the hood. (You can still read the session table directly,
 e.g. `duckdb.sql(f"SELECT COUNT(*) FROM read_parquet('{SESSION_DB}') WHERE subject_id = '754372'")`.)
 
+> **Reading a [snapshot](#snapshots-reproducible--pinned-data-sources) from raw SQL?** The
+> `SESSION_DB` / `TRIAL_DB` / `EVENT_DB` constants are fixed to the **latest** database and do **not**
+> honour `use_snapshot()`. Use the snapshot-aware accessors `session_db()` / `trial_db()` /
+> `event_db()` instead — they return the resolved path (latest, the pinned snapshot, or a per-call
+> `snapshot="20260604"`):
+>
+> ```python
+> from aind_dynamic_foraging_database import use_snapshot, trial_db
+> use_snapshot("20260604")
+> duckdb.sql(f"SELECT * FROM read_parquet('{trial_db()}/**/*.parquet', "
+>            f"hive_partitioning=true, union_by_name=true) WHERE subject_id = '754372'")
+> ```
+
 ### The three read options (always use these on the partitioned tables)
 
 ```python

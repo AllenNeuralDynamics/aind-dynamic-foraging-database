@@ -26,10 +26,13 @@ from aind_dynamic_foraging_database.query import (  # noqa: F401
     TRIAL_DB,
     clear_caches,
     current_snapshot,
+    event_db,
     fetch_events,
     fetch_trials,
     read_events,
     read_trials,
     select_sessions,
+    session_db,
+    trial_db,
     use_snapshot,
 )

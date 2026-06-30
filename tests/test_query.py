@@ -161,6 +161,23 @@ class TestSnapshots(unittest.TestCase):
         self.assertIsNone(query.current_snapshot())
         self.assertEqual(query._resolve_base(None, query._UNSET, "trial"), query.TRIAL_DB)
 
+    def test_path_accessors_honour_snapshot(self):
+        """session_db/trial_db/event_db track the global + per-call snapshot (unlike constants)."""
+        P = query.PROD_S3_PREFIX
+        # latest by default
+        self.assertEqual(query.session_db(), query.SESSION_DB)
+        self.assertEqual(query.trial_db(), query.TRIAL_DB)
+        self.assertEqual(query.event_db(), query.EVENT_DB)
+        # per-call snapshot
+        self.assertEqual(query.trial_db(snapshot="20260604"),
+                         f"{P}/snapshots/20260604/trial_table")
+        # global snapshot is honoured; explicit None overrides back to latest
+        query.use_snapshot("20260604")
+        self.assertEqual(query.session_db(), f"{P}/snapshots/20260604/session_table.parquet")
+        self.assertEqual(query.event_db(), f"{P}/snapshots/20260604/event_table")
+        self.assertEqual(query.trial_db(snapshot=None), query.TRIAL_DB)
+        query.use_snapshot(None)
+
     def test_use_snapshot_clears_partition_cache(self):
         """Switching the global snapshot drops the per-base partition listing cache."""
         query._PARTITION_CACHE["some/base"] = {"754372"}
