@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Code Ocean reproducible-run entrypoint: thin launcher for the update script.
-set -euo pipefail
-cd "$(dirname "$(readlink -f "$0")")/.."   # repo root
-export PYTHONPATH="src:${PYTHONPATH:-}"     # use the mounted checkout; deps are baked in the image
-exec python -u code/run_update_dfdb.py "$@"
+set -ex
+
+# This is the master script for the capsule. When you click "Reproducible Run", the code in this file will execute.
+python -u run_update_dfdb.py "$@"
