@@ -148,6 +148,115 @@ def event_db(snapshot=_UNSET):
     return _resolve_base(None, snapshot, "event")
 
 
+def status(prefix=None, con=None, verbose=True):
+    """Summarize the status of the live database and every snapshot.
+
+    For the live (latest) database and each dated snapshot under ``<prefix>/snapshots/``, report
+    when it was last built, the most recent behavior session it holds, how many sessions /
+    subjects, and the per-source session breakdown — plus a reminder of how to read each. Session
+    counts / dates / sources come from each database's own ``session_table.parquet`` (the
+    authoritative table); the last-build time comes from its ``build_history.json``.
+
+    Parameters
+    ----------
+    prefix : str, optional
+        Database prefix to inspect — the ``s3://`` production prefix by default (no AWS credentials
+        needed), or a local directory / other S3 prefix for another build.
+    con : duckdb connection, optional
+        DuckDB connection to run on (default: the module connection).
+    verbose : bool, optional
+        Also print a human-readable report and access instructions (default: ``True``).
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per database — ``live`` first, then each snapshot newest-first — with columns
+        ``database, last_update, last_session_date, n_sessions, n_subjects, sources``. ``database``
+        is ``"live"`` or the snapshot id; ``sources`` is a dict ``{nwb_data_source: n_sessions}``.
+    """
+    import pandas as pd
+
+    prefix = (prefix or PROD_S3_PREFIX).rstrip("/")
+    conn = _conn(con)
+    rows = [_db_status("live", prefix, conn)]
+    for date in _list_snapshots(prefix, conn):
+        rows.append(_db_status(date, f"{prefix}/snapshots/{date}", conn))
+    df = pd.DataFrame(rows)
+    if verbose:
+        _print_info(df, prefix)
+    return df
+
+
+def _list_snapshots(prefix, con):
+    """Dated snapshot ids under ``<prefix>/snapshots/`` (those with a session table), newest first."""
+    try:
+        rows = con.sql(
+            f"SELECT file FROM glob('{prefix}/snapshots/*/session_table.parquet')").df()
+    except Exception:
+        return []
+    dates = rows["file"].str.extract(r"/snapshots/([^/]+)/")[0].dropna()
+    return sorted(set(dates), reverse=True)
+
+
+def _db_status(name, base, con):
+    """Status row for one database rooted at ``base`` (the live prefix or a snapshot dir)."""
+    session_path = f"{base}/session_table.parquet"
+    agg = con.sql(f"""
+        SELECT COUNT(*) AS n_sessions,
+               COUNT(DISTINCT subject_id) AS n_subjects,
+               MAX(session_date) AS last_session_date
+        FROM read_parquet('{session_path}')
+    """).df().iloc[0]
+    try:
+        src = con.sql(f"""
+            SELECT nwb_data_source, COUNT(*) AS n FROM read_parquet('{session_path}')
+            GROUP BY nwb_data_source ORDER BY n DESC
+        """).df()
+        sources = dict(zip(src["nwb_data_source"], src["n"].astype(int)))
+    except duckdb.BinderException:  # session table without an nwb_data_source column
+        sources = {}
+    return {
+        "database": name,
+        "last_update": _last_build_time(base, con),
+        "last_session_date": agg["last_session_date"],
+        "n_sessions": int(agg["n_sessions"]),
+        "n_subjects": int(agg["n_subjects"]),
+        "sources": sources,
+    }
+
+
+def _last_build_time(base, con):
+    """Finish time of the most recent run in ``build_history.json`` under ``base`` (None if absent)."""
+    try:
+        row = con.sql(
+            f"SELECT MAX(finished_at) AS t FROM read_json_auto('{base}/build_history.json')").df()
+        return row["t"].iloc[0]
+    except Exception:
+        return None
+
+
+def _print_info(df, prefix):
+    """Print the status table from :func:`status` plus brief live/snapshot access instructions."""
+    print(f"Foraging database @ {prefix}\n")
+    for _, r in df.iterrows():
+        tag = "live (latest)" if r["database"] == "live" else f"snapshot {r['database']}"
+        sources = ", ".join(f"{k}={v}" for k, v in r["sources"].items()) or "-"
+        print(f"  {tag}")
+        print(f"    last build       : {r['last_update'] or '?'}")
+        print(f"    last session date: {r['last_session_date'] or '?'}")
+        print(f"    sessions/subjects: {r['n_sessions']} sessions, {r['n_subjects']} subjects")
+        print(f"    sources          : {sources}\n")
+    print("Access:")
+    print("  import aind_dynamic_foraging_database as db")
+    print('  db.select_sessions("foraging_eff > 0.8")        # live (latest) database')
+    snaps = df.loc[df["database"] != "live", "database"].tolist()
+    if snaps:
+        s = snaps[0]
+        print(f'  db.use_snapshot("{s}")                  # pin every read to a snapshot')
+        print(f'  db.select_sessions("foraging_eff > 0.8", snapshot="{s}")   # or per-call')
+        print("  db.use_snapshot(None)                           # back to live")
+
+
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------

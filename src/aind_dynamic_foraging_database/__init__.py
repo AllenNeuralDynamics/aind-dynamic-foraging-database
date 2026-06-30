@@ -33,6 +33,7 @@ from aind_dynamic_foraging_database.query import (  # noqa: F401
     read_trials,
     select_sessions,
     session_db,
+    status,
     trial_db,
     use_snapshot,
 )
