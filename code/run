@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+#
+# Code Ocean "Reproducible Run" entrypoint.
+#
+# Incrementally updates the production foraging database from all sources (CO assets +
+# bonsai/bpod NWBs) -- incremental by default, so it only processes sessions not already in
+# build_metadata.json -- then archives this run's build log + provenance JSONs into /results,
+# which Code Ocean versions per run.
+#
+# The [build] dependencies are baked into the capsule image (see environment/postInstall); this
+# script only registers the (mounted, possibly newer) package code, so runs never reinstall deps.
+#
+# Override knobs via env: OUT_PREFIX, N_WORKERS, CUTOFF_DATE (optional).
+set -uo pipefail
+
+# --- locate the repo root (this script lives in <repo>/code/run) ---
+REPO_ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+cd "$REPO_ROOT"
+
+OUT_PREFIX="${OUT_PREFIX:-s3://aind-scratch-data/aind-dynamic-foraging-cache}"
+N_WORKERS="${N_WORKERS:-96}"
+RESULTS_DIR="${CO_RESULTS_DIR:-/results}"
+export PYTHONUNBUFFERED=1
+
+# Register the checked-out package without touching deps (already in the image).
+uv pip install --system --no-deps -e . >/dev/null 2>&1 \
+  || pip install --no-deps -e . >/dev/null 2>&1 || true
+
+# --- run the incremental update, teeing the console into /results ---
+mkdir -p "$RESULTS_DIR"
+CONSOLE_LOG="$RESULTS_DIR/build_console.log"
+CUTOFF_ARG=()
+[ -n "${CUTOFF_DATE:-}" ] && CUTOFF_ARG=(--cutoff-date "$CUTOFF_DATE")
+
+aind-df-build --out-dir "$OUT_PREFIX" --n-workers "$N_WORKERS" "${CUTOFF_ARG[@]}" 2>&1 | tee "$CONSOLE_LOG"
+status=${PIPESTATUS[0]}
+
+# --- copy provenance artifacts (build_history.json + this build's raw log + JSON/CSV state)
+#     from the output prefix into /results, so each CO run carries a self-contained record ---
+python - "$OUT_PREFIX" "$RESULTS_DIR" <<'PY' || true
+import os, sys, s3fs
+out, results = sys.argv[1], sys.argv[2]
+if out.startswith("s3://"):
+    fs = s3fs.S3FileSystem(anon=False)
+    base = out[len("s3://"):]
+    exists = fs.exists; ls = fs.ls; get = lambda s, d: fs.get(s, d)
+else:
+    import shutil
+    base = out
+    exists = os.path.exists; ls = lambda p: [os.path.join(p, n) for n in os.listdir(p)]
+    get = lambda s, d: shutil.copy2(s, d)
+for name in ("build_history.json", "build_metadata.json", "processing_log.csv", "co_skipped_sessions.csv"):
+    src = f"{base}/{name}"
+    if exists(src):
+        get(src, os.path.join(results, name))
+logs = f"{base}/logs"
+if exists(logs):
+    raw = sorted(p for p in ls(logs) if p.endswith(".log"))
+    if raw:  # newest per-build raw log = this run's
+        get(raw[-1], os.path.join(results, os.path.basename(raw[-1])))
+print("archived provenance ->", results)
+PY
+
+exit "$status"
