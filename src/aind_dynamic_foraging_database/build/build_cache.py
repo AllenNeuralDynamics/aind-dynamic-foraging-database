@@ -40,6 +40,7 @@ Or drive it programmatically (the module is import-safe — nothing runs on impo
 import argparse
 import contextlib
 import io
+import json
 import logging
 import os
 import subprocess
@@ -334,9 +335,12 @@ def _capture_run_log(buf):
 def _git_commit() -> Optional[str]:
     """Return the build code's git commit (``<sha>`` or ``<sha>-dirty``), or ``None``.
 
-    Best-effort: resolved from the package's source tree so it captures the checkout the build
-    actually ran from (e.g. the CO capsule). Returns ``None`` when there is no git repo (pip/wheel
-    install) or git is unavailable, so it never fails a build.
+    Best-effort, in order: (1) a live git checkout (dev / mounted source with ``.git``), then
+    (2) the commit pip recorded when the package was installed from git (PEP 610
+    ``direct_url.json`` -> ``vcs_info.commit_id``). (2) is what populates the commit inside a
+    Code Ocean Reproducible Run, where the package is pip-installed from ``git+...@<ref>`` into
+    site-packages (no ``.git``, so the git command finds nothing). Returns ``None`` for a plain
+    wheel/PyPI install. Never fails a build.
     """
     pkg_dir = os.path.dirname(os.path.abspath(__file__))
     try:
@@ -344,18 +348,27 @@ def _git_commit() -> Optional[str]:
             ["git", "-C", pkg_dir, "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=5,
         )
-        if sha.returncode != 0:
-            return None
-        commit = sha.stdout.strip()
-        dirty = subprocess.run(
-            ["git", "-C", pkg_dir, "status", "--porcelain"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if dirty.returncode == 0 and dirty.stdout.strip():
-            commit += "-dirty"
-        return commit
+        if sha.returncode == 0:
+            commit = sha.stdout.strip()
+            dirty = subprocess.run(
+                ["git", "-C", pkg_dir, "status", "--porcelain"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if dirty.returncode == 0 and dirty.stdout.strip():
+                commit += "-dirty"
+            return commit
     except (OSError, subprocess.SubprocessError):
-        return None
+        pass
+    # Fall back to the commit pip recorded for a git install (no .git in site-packages).
+    try:
+        from importlib.metadata import distribution
+
+        raw = distribution("aind-dynamic-foraging-database").read_text("direct_url.json")
+        if raw:
+            return (json.loads(raw).get("vcs_info") or {}).get("commit_id")
+    except Exception:  # noqa: BLE001 - best-effort provenance; never fail a build
+        pass
+    return None
 
 
 def _record_build(cfg, build_id, started, finished, summary, status, error, log_text) -> None:
