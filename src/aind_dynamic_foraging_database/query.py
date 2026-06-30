@@ -98,8 +98,8 @@ def _resolve_base(base, snapshot, kind):
     """Resolve the read path for table ``kind`` ('session' | 'trial' | 'event').
 
     Precedence (explicit always wins): an explicit ``base=`` > the effective snapshot > the latest
-    default. The effective snapshot is the per-call ``snapshot`` if it was passed (``is not _UNSET``)
-    — including an explicit ``None`` that forces latest — otherwise the global :func:`use_snapshot`.
+    default. The effective snapshot is the per-call ``snapshot`` if passed (``is not _UNSET``) —
+    including an explicit ``None`` that forces latest — otherwise the global :func:`use_snapshot`.
     """
     if base is not None:
         return base

@@ -16,6 +16,7 @@ import pandas as pd
 
 from aind_dynamic_foraging_database import query
 from aind_dynamic_foraging_database.build import parquet_builder
+from aind_dynamic_foraging_database.build.snapshot import create_snapshot
 
 TEST_NWB_DIR = "./tests/nwb"
 
@@ -124,6 +125,91 @@ class TestQueryHelpers(unittest.TestCase):
             empty = query.select_sessions("foraging_eff > 999", base=session_path)
             self.assertEqual(len(empty), 0)
             self.assertEqual(len(query.fetch_trials(empty, base=trial_prefix)), 0)
+
+
+class TestSnapshots(unittest.TestCase):
+    """Snapshot creation (local) and the use_snapshot / snapshot= read selector."""
+
+    def tearDown(self):
+        """Always reset the global snapshot so tests don't leak state into each other."""
+        query.use_snapshot(None)
+
+    def test_resolve_base_precedence(self):
+        """_resolve_base: explicit base > per-call snapshot > global > latest default."""
+        P = query.PROD_S3_PREFIX
+        # default (no snapshot) -> the live module defaults
+        self.assertEqual(query._resolve_base(None, query._UNSET, "session"), query.SESSION_DB)
+        self.assertEqual(query._resolve_base(None, query._UNSET, "trial"), query.TRIAL_DB)
+        self.assertEqual(query._resolve_base(None, query._UNSET, "event"), query.EVENT_DB)
+        # explicit base always wins, even with a snapshot passed
+        self.assertEqual(query._resolve_base("/x", query._UNSET, "trial"), "/x")
+        self.assertEqual(query._resolve_base("/x", "20260604", "trial"), "/x")
+        # per-call snapshot -> snapshots/<date>/<suffix>
+        self.assertEqual(query._resolve_base(None, "20260604", "session"),
+                         f"{P}/snapshots/20260604/session_table.parquet")
+        self.assertEqual(query._resolve_base(None, "20260604", "trial"),
+                         f"{P}/snapshots/20260604/trial_table")
+        self.assertEqual(query._resolve_base(None, "20260604", "event"),
+                         f"{P}/snapshots/20260604/event_table")
+        # global setter + round-trip; explicit None overrides the global back to latest
+        query.use_snapshot("20260604")
+        self.assertEqual(query.current_snapshot(), "20260604")
+        self.assertEqual(query._resolve_base(None, query._UNSET, "trial"),
+                         f"{P}/snapshots/20260604/trial_table")
+        self.assertEqual(query._resolve_base(None, None, "trial"), query.TRIAL_DB)
+        query.use_snapshot(None)
+        self.assertIsNone(query.current_snapshot())
+        self.assertEqual(query._resolve_base(None, query._UNSET, "trial"), query.TRIAL_DB)
+
+    def test_use_snapshot_clears_partition_cache(self):
+        """Switching the global snapshot drops the per-base partition listing cache."""
+        query._PARTITION_CACHE["some/base"] = {"754372"}
+        query.use_snapshot("20260604")
+        self.assertEqual(query._PARTITION_CACHE, {})
+
+    def test_create_snapshot_local_and_query_through_selector(self):
+        """create_snapshot copies all tables (excl. snapshots/); snapshot= reads match latest."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            os.makedirs(cache_dir)
+            session_path, trial_prefix, event_prefix = _build_local_cache(cache_dir)
+            # a pre-existing snapshots/ dir must NOT be copied into the new snapshot
+            os.makedirs(os.path.join(cache_dir, "snapshots", "old"))
+
+            snap = create_snapshot("20260604", prefix=cache_dir)
+            self.assertEqual(snap, os.path.join(cache_dir, "snapshots", "20260604"))
+            self.assertEqual(sorted(os.listdir(snap)),
+                             ["event_table", "session_table.parquet", "trial_table"])
+
+            # latest (live) read
+            latest = query.select_sessions("foraging_eff > 0", base=session_path)
+            # snapshot read via the global selector: point PROD_S3_PREFIX at our local cache
+            orig_prefix = query.PROD_S3_PREFIX
+            try:
+                query.PROD_S3_PREFIX = cache_dir
+                query.use_snapshot("20260604")
+                snap_sel = query.select_sessions("foraging_eff > 0")
+                snap_tr = query.fetch_trials(snap_sel, columns=["animal_response"])
+            finally:
+                query.PROD_S3_PREFIX = orig_prefix
+                query.use_snapshot(None)
+            # the snapshot is a faithful copy -> same sessions and trial counts as latest
+            self.assertEqual(sorted(snap_sel["_session_id"]), sorted(latest["_session_id"]))
+            latest_tr = query.fetch_trials(latest, base=trial_prefix, columns=["animal_response"])
+            self.assertEqual(len(snap_tr), len(latest_tr))
+
+    def test_create_snapshot_overwrite_and_bad_date(self):
+        """create_snapshot guards an existing snapshot and rejects a non-YYYYMMDD date."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            os.makedirs(cache_dir)
+            _build_local_cache(cache_dir)
+            create_snapshot("20260604", prefix=cache_dir)
+            with self.assertRaises(FileExistsError):
+                create_snapshot("20260604", prefix=cache_dir)
+            create_snapshot("20260604", prefix=cache_dir, overwrite=True)  # ok
+            with self.assertRaises(ValueError):
+                create_snapshot("2026-06-04", prefix=cache_dir)
 
 
 if __name__ == "__main__":

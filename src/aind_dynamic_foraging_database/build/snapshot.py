@@ -73,8 +73,8 @@ def create_snapshot(date=None, prefix=PROD_S3_PREFIX, *, overwrite=False) -> str
     return dest
 
 
-def _create_snapshot_s3(prefix: str, dest: str, overwrite: bool) -> None:
-    """Server-side copy every top-level entry (except ``snapshots/``) from ``prefix`` to ``dest``."""
+def _create_snapshot_s3(prefix: str, dest: str, overwrite: bool) -> None:  # pragma: no cover
+    """Server-side copy each top-level entry (except ``snapshots/``) from ``prefix`` to ``dest``."""
     import s3fs
 
     fs = s3fs.S3FileSystem(anon=False)
