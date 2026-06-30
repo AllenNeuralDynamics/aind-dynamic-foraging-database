@@ -17,7 +17,7 @@ Building/extending the database lives in the ``build`` subpackage (``build.build
 this package to *query* stays lightweight.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from aind_dynamic_foraging_database.query import (  # noqa: F401
     EVENT_DB,
