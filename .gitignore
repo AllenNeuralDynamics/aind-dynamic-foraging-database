@@ -10,3 +10,7 @@ htmlcov/
 .ipynb_checkpoints/
 scratch/
 .DS_Store
+.vscode
+environment
+metadata
+.codeocean
