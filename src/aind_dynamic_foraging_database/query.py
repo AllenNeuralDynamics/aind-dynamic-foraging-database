@@ -226,11 +226,18 @@ def _db_status(name, base, con):
 
 
 def _last_build_time(base, con):
-    """Finish time of the latest run in ``build_history.json`` under ``base`` (None if absent)."""
+    """Finish time of the latest run in ``build_history.json`` under ``base`` (None if absent).
+
+    Returned as a tz-naive (UTC) ``pandas.Timestamp`` so the dtype is stable regardless of whether
+    DuckDB's JSON reader infers ``finished_at`` as a TIMESTAMP or a VARCHAR (it varies by version).
+    """
+    import pandas as pd
+
     try:
         row = con.sql(
             f"SELECT MAX(finished_at) AS t FROM read_json_auto('{base}/build_history.json')").df()
-        return row["t"].iloc[0]
+        val = row["t"].iloc[0]
+        return None if pd.isna(val) else pd.to_datetime(val, utc=True).tz_localize(None)
     except Exception:
         return None
 
