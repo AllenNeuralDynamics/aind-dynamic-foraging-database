@@ -42,6 +42,7 @@ import contextlib
 import io
 import logging
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -267,7 +268,7 @@ def main(cfg: Config) -> dict:
     buf = io.StringIO()
     try:
         with _capture_run_log(buf):
-            print(f"build_id: {build_id}   code version: {__version__}")
+            print(f"build_id: {build_id}   code version: {__version__}   git: {_git_commit()}")
             summary = _run_pipeline(cfg)
     except Exception as exc:  # noqa: BLE001 - record the failure in history/log, then re-raise
         import traceback
@@ -330,6 +331,33 @@ def _capture_run_log(buf):
         root.removeHandler(handler)
 
 
+def _git_commit() -> Optional[str]:
+    """Return the build code's git commit (``<sha>`` or ``<sha>-dirty``), or ``None``.
+
+    Best-effort: resolved from the package's source tree so it captures the checkout the build
+    actually ran from (e.g. the CO capsule). Returns ``None`` when there is no git repo (pip/wheel
+    install) or git is unavailable, so it never fails a build.
+    """
+    pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        sha = subprocess.run(
+            ["git", "-C", pkg_dir, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if sha.returncode != 0:
+            return None
+        commit = sha.stdout.strip()
+        dirty = subprocess.run(
+            ["git", "-C", pkg_dir, "status", "--porcelain"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if dirty.returncode == 0 and dirty.stdout.strip():
+            commit += "-dirty"
+        return commit
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _record_build(cfg, build_id, started, finished, summary, status, error, log_text) -> None:
     """Append a build-history entry and write the raw run log (best-effort; never fails a build)."""
     event = {
@@ -339,6 +367,7 @@ def _record_build(cfg, build_id, started, finished, summary, status, error, log_
         "duration_s": round((finished - started).total_seconds(), 1),
         "status": status,
         "code_version": __version__,
+        "git_commit": _git_commit(),
         "out_dir": cfg.out_dir,
         "incremental": not cfg.full_rebuild,
         "limit": cfg.limit,
