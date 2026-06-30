@@ -42,7 +42,7 @@ _DRILL_DOWN_SESSIONS = 10  # full row-level diff for at most this many mismatche
 
 
 def _table_src(prefix, table):
-    """A ``read_parquet(...)`` clause for ``table`` ('trial_table'|'event_table') under ``prefix``."""
+    """A ``read_parquet(...)`` clause for ``table`` (trial_table|event_table) under ``prefix``."""
     return (f"read_parquet('{prefix.rstrip('/')}/{table}/**/*.parquet', "
             f"hive_partitioning=true, union_by_name=true)")
 
@@ -53,8 +53,16 @@ def _columns(con, src):
 
 
 def _digest_expr(key_cols):
-    """An order-independent per-group value checksum over ``key_cols`` (cast to text first)."""
-    casts = ", ".join(f"CAST({c} AS VARCHAR)" for c in key_cols)
+    """An order-independent per-group value checksum over ``key_cols``.
+
+    Numeric-castable values are normalized to a canonical DOUBLE string so a benign dtype
+    change (e.g. ``trial`` DOUBLE vs BIGINT: ``'0.0'`` vs ``'0'``) doesn't spuriously differ;
+    genuine strings (e.g. ``'none'``) fall through to their text form unchanged.
+    """
+    casts = ", ".join(
+        f"COALESCE(CAST(TRY_CAST({c} AS DOUBLE) AS VARCHAR), CAST({c} AS VARCHAR))"
+        for c in key_cols
+    )
     return f"bit_xor(hash({casts}))"
 
 
