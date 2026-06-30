@@ -56,6 +56,7 @@ def _build_local_cache(tmpdir):
         f"hive_partitioning=true, union_by_name=true)").df()
     sess["task"] = "TestTask"
     sess["foraging_eff"] = 0.5
+    sess["nwb_data_source"] = "bonsai_s3"  # all test NWBs come from the bonsai route
     session_path = os.path.join(tmpdir, "session_table.parquet")
     sess.to_parquet(session_path, index=False)
     return session_path, trial_prefix, event_prefix
@@ -230,6 +231,46 @@ class TestSnapshots(unittest.TestCase):
             self.assertEqual(sorted(snap_sel["_session_id"]), sorted(latest["_session_id"]))
             latest_tr = query.fetch_trials(latest, base=trial_prefix, columns=["animal_response"])
             self.assertEqual(len(snap_tr), len(latest_tr))
+
+    def test_status_live_and_snapshots(self):
+        """status reports the live database + each snapshot with counts/date/sources."""
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            os.makedirs(cache_dir)
+            session_path, _, _ = _build_local_cache(cache_dir)
+            with open(os.path.join(cache_dir, "build_history.json"), "w") as f:
+                json.dump([{"build_id": "20260604T101530Z",
+                            "finished_at": "2026-06-04T10:15:30+00:00"}], f)
+            create_snapshot("20260604", prefix=cache_dir)
+
+            info = query.status(prefix=cache_dir, verbose=False)
+            self.assertEqual(list(info["database"]), ["live", "20260604"])
+
+            # ground truth from the session table the cache was built from
+            sess = duckdb.sql(f"SELECT * FROM read_parquet('{session_path}')").df()
+            live = info.iloc[0]
+            self.assertEqual(live["n_sessions"], len(sess))
+            self.assertEqual(live["n_subjects"], sess["subject_id"].nunique())
+            self.assertEqual(live["last_session_date"], sess["session_date"].max())
+            self.assertEqual(live["sources"], {"bonsai_s3": len(sess)})
+            self.assertEqual(str(live["last_update"]), "2026-06-04 10:15:30")
+
+            # the snapshot is a faithful copy -> identical counts to live
+            snap = info.iloc[1]
+            for col in ("n_sessions", "n_subjects", "last_session_date", "sources"):
+                self.assertEqual(snap[col], live[col])
+
+    def test_status_no_snapshots(self):
+        """status on a prefix with no snapshots/ returns just the live row."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            os.makedirs(cache_dir)
+            _build_local_cache(cache_dir)
+            info = query.status(prefix=cache_dir, verbose=False)
+            self.assertEqual(list(info["database"]), ["live"])
+            self.assertIsNone(info.iloc[0]["last_update"])  # no build_history.json
 
     def test_create_snapshot_overwrite_and_bad_date(self):
         """create_snapshot guards an existing snapshot and rejects a non-YYYYMMDD date."""
