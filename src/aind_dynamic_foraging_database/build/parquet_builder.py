@@ -480,10 +480,27 @@ def _fill_co_only_metadata(new_rows, co_new):
     new_rows["data_source"] = ("AIND_" + rig_type + "_" + room + "_bonsai").to_numpy()
 
 
+def _apply_session_cutoff(df_sessions, cutoff_date, verbose=True):
+    """Keep only sessions with ``session_date <= cutoff_date`` (``YYYY-MM-DD``).
+
+    ``cutoff_date=None`` returns the frame unchanged. ``session_date`` is a normalised
+    ``YYYY-MM-DD`` string, so the comparison is a safe lexicographic one.
+    """
+    if cutoff_date is None:
+        return df_sessions
+    cutoff = pd.to_datetime(cutoff_date).strftime("%Y-%m-%d")
+    before = len(df_sessions)
+    out = df_sessions[df_sessions["session_date"] <= cutoff].copy()
+    if verbose:
+        print(f"  cutoff-date {cutoff}: kept {len(out)} of {before} sessions")
+    return out
+
+
 def build_session_table(  # noqa: C901
     output_path=SESSION_TABLE_S3_URI,
     include_co_assets=True,
     co_discovery=None,
+    cutoff_date=None,
     verbose=True,
 ):
     """
@@ -518,6 +535,11 @@ def build_session_table(  # noqa: C901
     co_discovery : pd.DataFrame | None
         Optional pre-fetched get_dynamic_foraging_assets() result, to skip the
         ~137 s docDB query (handy for dev iteration / local caching). None -> fetch.
+    cutoff_date : str | None
+        Optional ``YYYY-MM-DD`` cutoff: keep only sessions with
+        ``session_date <= cutoff_date``, for a reproducible "as of <date>" build.
+        Applied before writing, so the session table and the trial/event tables
+        built from it are all bounded to the same set. None -> no cutoff.
     verbose : bool
 
     Returns:
@@ -565,6 +587,9 @@ def build_session_table(  # noqa: C901
 
     # ---- 7. Assign preferred NWB data source per session (refresh on all rows) ----
     df_sessions["nwb_data_source"] = df_sessions.apply(_assign_nwb_data_source, axis=1)
+
+    # ---- 7b. Optional session-date cutoff (reproducible "as of <date>" build) ----
+    df_sessions = _apply_session_cutoff(df_sessions, cutoff_date, verbose=verbose)
 
     # ---- 8. Write to parquet ----
     if verbose:

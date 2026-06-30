@@ -68,6 +68,7 @@ class Config:
     n_workers: Optional[int] = None  # worker processes; None -> CO_CPUS-1
     coalesce: bool = True  # merge each subject's sessions into one parquet file
     co_cache: Optional[str] = None  # dev: cache the docDB discovery (pickle) here
+    cutoff_date: Optional[str] = None  # YYYY-MM-DD: only sessions on/before this date
 
     @property
     def is_s3(self) -> bool:
@@ -128,6 +129,7 @@ def build_sessions(cfg: Config):
         output_path=cfg.session_out,
         include_co_assets=True,
         co_discovery=_load_or_fetch_co_discovery(cfg),
+        cutoff_date=cfg.cutoff_date,
         verbose=True,
     )
 
@@ -340,6 +342,7 @@ def _record_build(cfg, build_id, started, finished, summary, status, error, log_
         "out_dir": cfg.out_dir,
         "incremental": not cfg.full_rebuild,
         "limit": cfg.limit,
+        "cutoff_date": cfg.cutoff_date,
         "n_workers": cfg.n_workers,
     }
     if summary is not None:
@@ -403,6 +406,9 @@ def parse_args(argv=None) -> Config:
     p.add_argument("--co-cache", default=None,
                    help="dev: path to cache the ~137s docDB discovery "
                         "(loaded if present, else fetched once and saved)")
+    p.add_argument("--cutoff-date", default=None,
+                   help="YYYY-MM-DD: build only sessions on/before this date, for a "
+                        "reproducible 'as of <date>' build (default: all sessions)")
     args = p.parse_args(argv)
     return Config(
         out_dir=args.out_dir,
@@ -411,6 +417,7 @@ def parse_args(argv=None) -> Config:
         n_workers=args.n_workers,
         coalesce=not args.no_coalesce,
         co_cache=args.co_cache,
+        cutoff_date=args.cutoff_date,
     )
 
 

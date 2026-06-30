@@ -245,5 +245,28 @@ class TestSnapshots(unittest.TestCase):
                 create_snapshot("2026-06-04", prefix=cache_dir)
 
 
+class TestCutoffDate(unittest.TestCase):
+    """The session-date cutoff filter and its CLI wiring."""
+
+    def test_apply_session_cutoff(self):
+        """_apply_session_cutoff keeps only sessions on/before the cutoff; None is a no-op."""
+        df = pd.DataFrame(
+            {"session_date": ["2026-05-30", "2026-06-01", "2026-06-04", "2026-06-10"]})
+        self.assertEqual(len(parquet_builder._apply_session_cutoff(df, None)), 4)
+        kept = parquet_builder._apply_session_cutoff(df, "2026-06-04", verbose=False)
+        self.assertEqual(sorted(kept["session_date"]),
+                         ["2026-05-30", "2026-06-01", "2026-06-04"])
+        # accepts other date spellings (normalised before compare)
+        kept2 = parquet_builder._apply_session_cutoff(df, "2026/06/01", verbose=False)
+        self.assertEqual(sorted(kept2["session_date"]), ["2026-05-30", "2026-06-01"])
+
+    def test_cli_cutoff_date_wiring(self):
+        """--cutoff-date flows into Config.cutoff_date."""
+        from aind_dynamic_foraging_database.build import build_cache
+        cfg = build_cache.parse_args(["--cutoff-date", "2026-06-04"])
+        self.assertEqual(cfg.cutoff_date, "2026-06-04")
+        self.assertIsNone(build_cache.parse_args([]).cutoff_date)
+
+
 if __name__ == "__main__":
     unittest.main()
