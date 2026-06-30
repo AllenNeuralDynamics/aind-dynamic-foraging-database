@@ -42,6 +42,111 @@ DEFAULT_EVENT_COLUMNS = ["trial", "timestamps", "event", "data"]
 # Leading identity columns we always emit and never duplicate from the trial/event side.
 _KEYS = ("subject_id", "session_date", "session_id")
 
+# Per-table suffixes under a prefix (live prefix or a snapshot dir share this layout).
+_TABLE_SUFFIX = {
+    "session": "session_table.parquet",
+    "trial": "trial_table",
+    "event": "event_table",
+}
+# Module default per table, used when reading the latest (live) database.
+_DEFAULT_BASE = {"session": SESSION_DB, "trial": TRIAL_DB, "event": EVENT_DB}
+
+
+# ---------------------------------------------------------------------------
+# Snapshots — pin reads to a frozen copy of the database (see create_snapshot)
+# ---------------------------------------------------------------------------
+
+# Globally selected snapshot ("20260604") or None for the latest (live) database.
+_SNAPSHOT = None
+# Sentinel for the per-call ``snapshot=`` kwarg, so an explicit ``snapshot=None``
+# (force latest) is distinguishable from "not passed" (fall back to the global).
+_UNSET = object()
+
+
+def use_snapshot(date):
+    """Globally pin all subsequent reads to a snapshot, or reset to the latest database.
+
+    Snapshots are immutable, dated copies of the whole database (see
+    :func:`aind_dynamic_foraging_database.build.snapshot.create_snapshot`). Pinning a snapshot
+    fixes the data source for an analysis or training run even as the live database keeps growing::
+
+        import aind_dynamic_foraging_database as db
+        db.use_snapshot("20260604")     # every read now hits snapshots/20260604/
+        ...
+        db.use_snapshot(None)           # back to the latest (live) database
+
+    Per-call ``snapshot=`` on the query helpers overrides this for a single call. Setting the
+    global drops the partition-listing cache so a stale listing from a different prefix can't leak.
+
+    Parameters
+    ----------
+    date : str or None
+        Snapshot id, ``YYYYMMDD`` (e.g. ``"20260604"``), or ``None`` to read the latest database.
+    """
+    global _SNAPSHOT
+    if date != _SNAPSHOT:
+        clear_caches()
+    _SNAPSHOT = date
+
+
+def current_snapshot():
+    """Return the globally pinned snapshot id, or ``None`` if reading the latest database."""
+    return _SNAPSHOT
+
+
+def _resolve_base(base, snapshot, kind):
+    """Resolve the read path for table ``kind`` ('session' | 'trial' | 'event').
+
+    Precedence (explicit always wins): an explicit ``base=`` > the effective snapshot > the latest
+    default. The effective snapshot is the per-call ``snapshot`` if passed (``is not _UNSET``) —
+    including an explicit ``None`` that forces latest — otherwise the global :func:`use_snapshot`.
+    """
+    if base is not None:
+        return base
+    snap = _SNAPSHOT if snapshot is _UNSET else snapshot
+    if snap is None:
+        return _DEFAULT_BASE[kind]
+    return f"{PROD_S3_PREFIX}/snapshots/{snap}/{_TABLE_SUFFIX[kind]}"
+
+
+# Snapshot-aware path accessors — the snapshot-respecting counterparts of the static
+# SESSION_DB / TRIAL_DB / EVENT_DB constants, for writing raw DuckDB SQL by hand. The
+# constants always point at the latest database; these honour use_snapshot / snapshot=.
+
+
+def session_db(snapshot=_UNSET):
+    """Session-table path (``session_table.parquet``), honouring the selected snapshot.
+
+    The snapshot-aware counterpart of :data:`SESSION_DB`, for raw SQL::
+
+        duckdb.sql(f"SELECT * FROM read_parquet('{session_db()}') WHERE foraging_eff > 0.8")
+
+    Returns the latest path by default, or ``snapshots/<date>/session_table.parquet`` when a
+    snapshot is pinned via :func:`use_snapshot`. Pass ``snapshot="20260604"`` to target one
+    directly, or ``snapshot=None`` to force latest regardless of the global.
+    """
+    return _resolve_base(None, snapshot, "session")
+
+
+def trial_db(snapshot=_UNSET):
+    """Trial-table directory prefix, honouring the selected snapshot.
+
+    The snapshot-aware counterpart of :data:`TRIAL_DB` (see :func:`session_db`). Use it as the
+    base of a partitioned read::
+
+        duckdb.sql(f"SELECT * FROM read_parquet('{trial_db()}/**/*.parquet', "
+                   f"hive_partitioning=true, union_by_name=true)")
+    """
+    return _resolve_base(None, snapshot, "trial")
+
+
+def event_db(snapshot=_UNSET):
+    """Event-table directory prefix, honouring the selected snapshot.
+
+    The snapshot-aware counterpart of :data:`EVENT_DB` (see :func:`session_db` / :func:`trial_db`).
+    """
+    return _resolve_base(None, snapshot, "event")
+
 
 # ---------------------------------------------------------------------------
 # Internals
@@ -120,7 +225,7 @@ def _scoped_read(base, subjects, con):
 # ---------------------------------------------------------------------------
 
 
-def read_trials(subjects=None, base=None, con=None):
+def read_trials(subjects=None, base=None, con=None, snapshot=_UNSET):
     """Return a ``read_parquet(...)`` clause for the trial table, scoped to ``subjects``.
 
     Drop the returned string into any SQL you write::
@@ -143,17 +248,22 @@ def read_trials(subjects=None, base=None, con=None):
     con : duckdb connection, optional
         DuckDB connection to run the partition listing on (default: the module connection).
         Pass your own for warm reuse, or custom settings (S3 region/creds, threads, memory).
+    snapshot : str, optional
+        Read from a snapshot (``"20260604"``) instead of the latest database, overriding any
+        global :func:`use_snapshot` for this call. Pass ``None`` to force latest. Ignored if
+        ``base`` is given. See :func:`use_snapshot`.
     """
-    return _scoped_read(base or TRIAL_DB, subjects, con)
+    return _scoped_read(_resolve_base(base, snapshot, "trial"), subjects, con)
 
 
-def read_events(subjects=None, base=None, con=None):
+def read_events(subjects=None, base=None, con=None, snapshot=_UNSET):
     """Return a ``read_parquet(...)`` clause for the event table, scoped to ``subjects``.
 
-    The event-table counterpart of :func:`read_trials` — same ``subjects`` / ``base`` / ``con``
-    behaviour, except ``base`` defaults to the production S3 ``event_table`` directory prefix.
+    The event-table counterpart of :func:`read_trials` — same ``subjects`` / ``base`` / ``con`` /
+    ``snapshot`` behaviour, except ``base`` defaults to the production S3 ``event_table`` directory
+    prefix.
     """
-    return _scoped_read(base or EVENT_DB, subjects, con)
+    return _scoped_read(_resolve_base(base, snapshot, "event"), subjects, con)
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +272,7 @@ def read_events(subjects=None, base=None, con=None):
 
 
 def select_sessions(where=None, subjects=None, columns=None, base=None, con=None,
-                    order_by="subject_id, session_date"):
+                    order_by="subject_id, session_date", snapshot=_UNSET):
     """Filter the (small) session table; return the selected sessions as a DataFrame.
 
     The first step of both common workflows — filter on session metrics/metadata, or on
@@ -187,13 +297,17 @@ def select_sessions(where=None, subjects=None, columns=None, base=None, con=None
         reuse across calls, or custom settings (S3 region/creds, threads, memory).
     order_by : str, optional
         SQL ORDER BY clause (default: ``"subject_id, session_date"``); pass ``None`` for none.
+    snapshot : str, optional
+        Read from a snapshot (``"20260604"``) instead of the latest database, overriding any
+        global :func:`use_snapshot` for this call. Pass ``None`` to force latest. Ignored if
+        ``base`` is given. See :func:`use_snapshot`.
 
     Returns
     -------
     pandas.DataFrame
         One row per selected session, with ``_session_id`` as the join key.
     """
-    base = base or SESSION_DB
+    base = _resolve_base(base, snapshot, "session")
     extra = [c for c in (columns or []) if c not in ("_session_id", *_KEYS)]
     sel_cols = ", ".join(["_session_id", "subject_id", "session_date", *extra])
     clauses = []
@@ -208,7 +322,7 @@ def select_sessions(where=None, subjects=None, columns=None, base=None, con=None
     ).df()
 
 
-def fetch_trials(sessions, columns=None, base=None, con=None):
+def fetch_trials(sessions, columns=None, base=None, con=None, snapshot=_UNSET):
     """Pull trial rows for a set of selected sessions, with session metadata joined on.
 
     Reads only the selected subjects' partitions (fast) and inner-joins to ``sessions`` on
@@ -231,6 +345,10 @@ def fetch_trials(sessions, columns=None, base=None, con=None):
     con : duckdb connection, optional
         DuckDB connection to run on (default: the module connection). Pass your own for warm
         reuse across calls, or custom settings (S3 region/creds, threads, memory).
+    snapshot : str, optional
+        Read from a snapshot (``"20260604"``) instead of the latest database, overriding any
+        global :func:`use_snapshot` for this call. Pass ``None`` to force latest. Ignored if
+        ``base`` is given. See :func:`use_snapshot`.
 
     Returns
     -------
@@ -238,11 +356,11 @@ def fetch_trials(sessions, columns=None, base=None, con=None):
         One row per trial, leading ``subject_id, session_date, session_id, trial``, ordered by
         ``subject_id, session_date, trial``.
     """
-    return _fetch(sessions, base or TRIAL_DB, columns or DEFAULT_TRIAL_COLUMNS,
-                  con, order_tail="trial", lead="trial")
+    return _fetch(sessions, _resolve_base(base, snapshot, "trial"),
+                  columns or DEFAULT_TRIAL_COLUMNS, con, order_tail="trial", lead="trial")
 
 
-def fetch_events(sessions, events=None, columns=None, base=None, con=None):
+def fetch_events(sessions, events=None, columns=None, base=None, con=None, snapshot=_UNSET):
     """Pull event rows for a set of selected sessions, with session metadata joined on.
 
     Like :func:`fetch_trials`, for the event table.
@@ -262,6 +380,10 @@ def fetch_events(sessions, events=None, columns=None, base=None, con=None):
     con : duckdb connection, optional
         DuckDB connection to run on (default: the module connection). Pass your own for warm
         reuse across calls, or custom settings (S3 region/creds, threads, memory).
+    snapshot : str, optional
+        Read from a snapshot (``"20260604"``) instead of the latest database, overriding any
+        global :func:`use_snapshot` for this call. Pass ``None`` to force latest. Ignored if
+        ``base`` is given. See :func:`use_snapshot`.
 
     Returns
     -------
@@ -270,8 +392,9 @@ def fetch_events(sessions, events=None, columns=None, base=None, con=None):
         ``subject_id, session_date, timestamps``.
     """
     extra_where = f"t.event IN ({_quote_in(events)})" if events else None
-    return _fetch(sessions, base or EVENT_DB, columns or DEFAULT_EVENT_COLUMNS,
-                  con, order_tail="timestamps", extra_where=extra_where)
+    return _fetch(sessions, _resolve_base(base, snapshot, "event"),
+                  columns or DEFAULT_EVENT_COLUMNS, con, order_tail="timestamps",
+                  extra_where=extra_where)
 
 
 def _fetch(sessions, base, columns, con, order_tail, extra_where=None, lead=None):

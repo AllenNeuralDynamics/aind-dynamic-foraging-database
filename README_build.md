@@ -24,8 +24,8 @@ they're released on PyPI):
 uv sync --extra build
 ```
 
-Building the **session table** additionally needs Han's pipeline package
-(`aind-analysis-arch-result-access`, AIND-internal), installed separately.
+The `build` extra includes Han's pipeline package (`aind-analysis-arch-result-access`,
+which provides `han_pipeline.get_session_table` for the session table).
 
 ---
 
@@ -113,6 +113,14 @@ We union them so the database is complete and keeps working after Han's pipeline
   dropping other-pipeline derived assets (PoseTracking, opto-sorting, …).
 - Uses **server-side pagination** (`paginate=True, paginate_batch_size=5000`) — the result
   is ~19k records and a single unpaginated query is unreliable.
+- **Incremental by default** (unless `--full-rebuild`): when a `session_table.parquet`
+  already exists, the full ~19k-record / ~137 s query is replaced by a server-side
+  date-filtered query (`session.session_start_time >= window_start`, via the
+  `extra_filter` arg) for sessions in the last `--lookback-days` (default 30) before the
+  latest session already built. That delta is merged and **upserted** into the existing
+  table; rows older than the window are kept verbatim. Trade-off: a session whose
+  `session_date` predates the window but is added/reprocessed in docDB later is only
+  picked up by a `--full-rebuild`; the lookback buffer covers the normal late-arrival.
 
 ### 3. Han ⇄ CO match rule (`_merge_han_and_co`, see [issue #146](https://github.com/AllenNeuralDynamics/aind-dynamic-foraging-data-utils/issues/146))
 Han is **≤ 1 session per `(subject, date)`** — its `add_session_number()` keeps only the
@@ -159,6 +167,14 @@ After the parallel per-session writes, each subject's files are merged into one 
   CO-asset reads are **I/O-bound** (S3 zarr), so going past the core count overlaps S3 latency:
   on a 16-core box **64 workers ≈ 4×** faster than default; beyond ~64 there's no gain (the
   `create_df_trials` parse saturates the cores). RAM is not the limit (~21 GB at 128 workers).
+- **Worker ceiling = the AWS credential endpoint, not the CPUs.** Each worker process
+  independently resolves the Code Ocean task-role credentials from the container metadata
+  endpoint (`169.254.170.2`). Too many workers stampede it: on a **64-CPU** box, **256 workers
+  fails** the whole build with mass `CredentialRetrievalError` (read-timeouts / 403 from the
+  metadata endpoint) — thousands of sessions dropped. This is **not** an IAM permission problem
+  (that surfaces as S3 `AccessDenied`, not a credential-*retrieval* timeout). **128 workers
+  succeeds** with zero credential errors. **Rule of thumb: cap at ~128 workers** (≈2× cores);
+  if `CredentialRetrievalError`s still appear, drop lower.
 - **docDB enrichment stays at 20 threads** — docDB 503s under higher concurrency, and it isn't
   the bottleneck.
 
@@ -185,13 +201,16 @@ Queries then use `union_by_name=true` to merge any remaining per-reader column d
 | Flag | Default | Meaning |
 |---|---|---|
 | `--out-dir` | local scratch | output dir or `s3://…` prefix (prod = `s3://aind-scratch-data/aind-dynamic-foraging-cache`) |
-| `--n-workers` | `CO_CPUS-1` | worker processes; **~64 recommended** for the I/O-bound CO reads |
+| `--n-workers` | `CO_CPUS-1` | worker processes; **~64 recommended**, **cap ~128** for the I/O-bound CO reads (above that the AWS credential endpoint `169.254.170.2` stampedes → `CredentialRetrievalError`; 256 fails on a 64-CPU box, 128 is safe) |
 | `--limit N` | all | build only a random N-session subset (quick test) |
-| `--full-rebuild` | off | ignore `build_metadata.json` and reprocess every session |
+| `--full-rebuild` | off | ignore `build_metadata.json` **and** re-query the full docDB universe; reprocess every session |
 | `--no-coalesce` | off | keep one parquet file per session instead of per subject |
 | `--co-cache PATH` | — | dev: cache the ~137 s docDB discovery (pickle) (load if present, else fetch+save) |
+| `--lookback-days N` | `30` | incremental docDB re-scan window: query only sessions in the last N days before the latest session already built, then upsert (ignored with `--full-rebuild`) |
 
-Incremental by default: re-running only processes sessions not already in `build_metadata.json`.
+Incremental by default, on two levels: the **session table** only re-queries docDB for the
+recent `--lookback-days` window and upserts (see §2 above), and the **trial/event** build only
+processes sessions not already in `build_metadata.json`.
 
 ---
 
@@ -200,6 +219,9 @@ Incremental by default: re-running only processes sessions not already in `build
 - **Build (full, 64 workers):** ~1 h, dominated by ~15k CO-asset S3 reads; incremental
   re-runs only touch new/unprocessed sessions (cheap). docDB discovery ≈ 137 s (cache it for
   dev with `--co-cache`).
+- **Build (full, 128 workers, 64-CPU box):** **~49 min** for 23.9k sessions
+  (`--full-rebuild --cutoff-date 2026-06-03`) — 128 is the safe max (see §7: 256 stampedes the
+  credential endpoint and fails).
 
 (For read/query performance, see [`README.md`](README.md).)
 

@@ -3,10 +3,16 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
-build/
+/build/
 dist/
 .coverage
 htmlcov/
 .ipynb_checkpoints/
 scratch/
 .DS_Store
+.vscode
+environment
+metadata
+.codeocean
+data/*
+.claude/settings.local.json

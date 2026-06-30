@@ -16,6 +16,7 @@ import pandas as pd
 
 from aind_dynamic_foraging_database import query
 from aind_dynamic_foraging_database.build import parquet_builder
+from aind_dynamic_foraging_database.build.snapshot import create_snapshot
 
 TEST_NWB_DIR = "./tests/nwb"
 
@@ -124,6 +125,183 @@ class TestQueryHelpers(unittest.TestCase):
             empty = query.select_sessions("foraging_eff > 999", base=session_path)
             self.assertEqual(len(empty), 0)
             self.assertEqual(len(query.fetch_trials(empty, base=trial_prefix)), 0)
+
+
+class TestSnapshots(unittest.TestCase):
+    """Snapshot creation (local) and the use_snapshot / snapshot= read selector."""
+
+    def tearDown(self):
+        """Always reset the global snapshot so tests don't leak state into each other."""
+        query.use_snapshot(None)
+
+    def test_resolve_base_precedence(self):
+        """_resolve_base: explicit base > per-call snapshot > global > latest default."""
+        P = query.PROD_S3_PREFIX
+        # default (no snapshot) -> the live module defaults
+        self.assertEqual(query._resolve_base(None, query._UNSET, "session"), query.SESSION_DB)
+        self.assertEqual(query._resolve_base(None, query._UNSET, "trial"), query.TRIAL_DB)
+        self.assertEqual(query._resolve_base(None, query._UNSET, "event"), query.EVENT_DB)
+        # explicit base always wins, even with a snapshot passed
+        self.assertEqual(query._resolve_base("/x", query._UNSET, "trial"), "/x")
+        self.assertEqual(query._resolve_base("/x", "20260604", "trial"), "/x")
+        # per-call snapshot -> snapshots/<date>/<suffix>
+        self.assertEqual(query._resolve_base(None, "20260604", "session"),
+                         f"{P}/snapshots/20260604/session_table.parquet")
+        self.assertEqual(query._resolve_base(None, "20260604", "trial"),
+                         f"{P}/snapshots/20260604/trial_table")
+        self.assertEqual(query._resolve_base(None, "20260604", "event"),
+                         f"{P}/snapshots/20260604/event_table")
+        # global setter + round-trip; explicit None overrides the global back to latest
+        query.use_snapshot("20260604")
+        self.assertEqual(query.current_snapshot(), "20260604")
+        self.assertEqual(query._resolve_base(None, query._UNSET, "trial"),
+                         f"{P}/snapshots/20260604/trial_table")
+        self.assertEqual(query._resolve_base(None, None, "trial"), query.TRIAL_DB)
+        query.use_snapshot(None)
+        self.assertIsNone(query.current_snapshot())
+        self.assertEqual(query._resolve_base(None, query._UNSET, "trial"), query.TRIAL_DB)
+
+    def test_path_accessors_honour_snapshot(self):
+        """session_db/trial_db/event_db track the global + per-call snapshot (unlike constants)."""
+        P = query.PROD_S3_PREFIX
+        # latest by default
+        self.assertEqual(query.session_db(), query.SESSION_DB)
+        self.assertEqual(query.trial_db(), query.TRIAL_DB)
+        self.assertEqual(query.event_db(), query.EVENT_DB)
+        # per-call snapshot
+        self.assertEqual(query.trial_db(snapshot="20260604"),
+                         f"{P}/snapshots/20260604/trial_table")
+        # global snapshot is honoured; explicit None overrides back to latest
+        query.use_snapshot("20260604")
+        self.assertEqual(query.session_db(), f"{P}/snapshots/20260604/session_table.parquet")
+        self.assertEqual(query.event_db(), f"{P}/snapshots/20260604/event_table")
+        self.assertEqual(query.trial_db(snapshot=None), query.TRIAL_DB)
+        query.use_snapshot(None)
+
+    def test_use_snapshot_clears_partition_cache(self):
+        """Switching the global snapshot drops the per-base partition listing cache."""
+        query._PARTITION_CACHE["some/base"] = {"754372"}
+        query.use_snapshot("20260604")
+        self.assertEqual(query._PARTITION_CACHE, {})
+
+    def test_create_snapshot_local_and_query_through_selector(self):
+        """create_snapshot copies all tables (excl. snapshots/); snapshot= reads match latest."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            os.makedirs(cache_dir)
+            session_path, trial_prefix, event_prefix = _build_local_cache(cache_dir)
+            # a pre-existing snapshots/ dir must NOT be copied into the new snapshot
+            os.makedirs(os.path.join(cache_dir, "snapshots", "old"))
+
+            # build provenance files that the snapshot should freeze + summarize in its manifest
+            import json
+            with open(os.path.join(cache_dir, "build_history.json"), "w") as f:
+                json.dump([{"build_id": "20260604T101530Z", "n_processed": 3}], f)
+            with open(os.path.join(cache_dir, "build_metadata.json"), "w") as f:
+                json.dump({"n_processed": 3}, f)
+
+            snap = create_snapshot("20260604", prefix=cache_dir)
+            self.assertEqual(snap, os.path.join(cache_dir, "snapshots", "20260604"))
+            self.assertEqual(
+                sorted(os.listdir(snap)),
+                ["build_history.json", "build_metadata.json", "event_table",
+                 "session_table.parquet", "snapshot_manifest.json", "trial_table"])
+            # manifest captures provenance from the copied build files
+            manifest = json.load(open(os.path.join(snap, "snapshot_manifest.json")))
+            self.assertEqual(manifest["snapshot_date"], "20260604")
+            self.assertEqual(manifest["latest_build_id"], "20260604T101530Z")
+            self.assertEqual(manifest["n_sessions"], 3)
+            self.assertEqual(manifest["source_prefix"], cache_dir)
+            self.assertIn("created_at_utc", manifest)
+
+            # latest (live) read
+            latest = query.select_sessions("foraging_eff > 0", base=session_path)
+            # snapshot read via the global selector: point PROD_S3_PREFIX at our local cache
+            orig_prefix = query.PROD_S3_PREFIX
+            try:
+                query.PROD_S3_PREFIX = cache_dir
+                query.use_snapshot("20260604")
+                snap_sel = query.select_sessions("foraging_eff > 0")
+                snap_tr = query.fetch_trials(snap_sel, columns=["animal_response"])
+            finally:
+                query.PROD_S3_PREFIX = orig_prefix
+                query.use_snapshot(None)
+            # the snapshot is a faithful copy -> same sessions and trial counts as latest
+            self.assertEqual(sorted(snap_sel["_session_id"]), sorted(latest["_session_id"]))
+            latest_tr = query.fetch_trials(latest, base=trial_prefix, columns=["animal_response"])
+            self.assertEqual(len(snap_tr), len(latest_tr))
+
+    def test_create_snapshot_overwrite_and_bad_date(self):
+        """create_snapshot guards an existing snapshot and rejects a non-YYYYMMDD date."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            os.makedirs(cache_dir)
+            _build_local_cache(cache_dir)
+            create_snapshot("20260604", prefix=cache_dir)
+            with self.assertRaises(FileExistsError):
+                create_snapshot("20260604", prefix=cache_dir)
+            create_snapshot("20260604", prefix=cache_dir, overwrite=True)  # ok
+            with self.assertRaises(ValueError):
+                create_snapshot("2026-06-04", prefix=cache_dir)
+
+
+class TestCutoffDate(unittest.TestCase):
+    """The session-date cutoff filter and its CLI wiring."""
+
+    def test_apply_session_cutoff(self):
+        """_apply_session_cutoff keeps only sessions on/before the cutoff; None is a no-op."""
+        df = pd.DataFrame(
+            {"session_date": ["2026-05-30", "2026-06-01", "2026-06-04", "2026-06-10"]})
+        self.assertEqual(len(parquet_builder._apply_session_cutoff(df, None)), 4)
+        kept = parquet_builder._apply_session_cutoff(df, "2026-06-04", verbose=False)
+        self.assertEqual(sorted(kept["session_date"]),
+                         ["2026-05-30", "2026-06-01", "2026-06-04"])
+        # accepts other date spellings (normalised before compare)
+        kept2 = parquet_builder._apply_session_cutoff(df, "2026/06/01", verbose=False)
+        self.assertEqual(sorted(kept2["session_date"]), ["2026-05-30", "2026-06-01"])
+
+    def test_cli_cutoff_date_wiring(self):
+        """--cutoff-date flows into Config.cutoff_date."""
+        from aind_dynamic_foraging_database.build import build_cache
+        cfg = build_cache.parse_args(["--cutoff-date", "2026-06-04"])
+        self.assertEqual(cfg.cutoff_date, "2026-06-04")
+        self.assertIsNone(build_cache.parse_args([]).cutoff_date)
+
+
+class TestValidateRebuild(unittest.TestCase):
+    """Two-build comparison: the digest-merge core and an end-to-end identical-build run."""
+
+    def test_compare_digests(self):
+        """_compare_digests flags row-count, checksum, and one-sided session differences."""
+        from aind_dynamic_foraging_database.build.validate import validate_rebuild as vr
+        old = pd.DataFrame({"session_id": ["a", "b", "c", "d"],
+                            "n": [10, 10, 10, 10], "checksum": [1, 2, 3, 4]})
+        new = pd.DataFrame({"session_id": ["a", "b", "c", "e"],
+                            "n": [10, 11, 10, 10], "checksum": [1, 2, 99, 5]})
+        res = vr._compare_digests(old, new)
+        self.assertEqual(res["n_match"], 1)            # only 'a' fully matches
+        reasons = dict(zip(res["mismatches"]["session_id"], res["mismatches"]["reason"]))
+        self.assertEqual(reasons["b"], "row_count")
+        self.assertEqual(reasons["c"], "checksum")
+        self.assertEqual(reasons["d"], "missing_in_new")
+        self.assertEqual(reasons["e"], "missing_in_old")
+
+    def test_validate_identical_builds(self):
+        """validate_builds reports zero mismatches for two identical local builds."""
+        from aind_dynamic_foraging_database.build.validate import validate_rebuild as vr
+        with tempfile.TemporaryDirectory() as tmp:
+            old, new = os.path.join(tmp, "old"), os.path.join(tmp, "new")
+            os.makedirs(old)
+            os.makedirs(new)
+            _build_local_cache(old)
+            _build_local_cache(new)
+            report = vr.validate_builds(old, new, cutoff_date="2099-01-01", verbose=False)
+            self.assertGreater(report["n_shared"], 0)
+            self.assertEqual(report["only_in_old"], [])
+            self.assertEqual(report["only_in_new"], [])
+            self.assertEqual(report["trial"]["n_mismatch"], 0)
+            self.assertEqual(report["event"]["n_mismatch"], 0)
+            self.assertEqual(report["trial"]["n_match"], report["n_shared"])
 
 
 if __name__ == "__main__":

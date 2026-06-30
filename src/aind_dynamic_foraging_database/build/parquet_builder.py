@@ -480,10 +480,68 @@ def _fill_co_only_metadata(new_rows, co_new):
     new_rows["data_source"] = ("AIND_" + rig_type + "_" + room + "_bonsai").to_numpy()
 
 
+def _apply_session_cutoff(df_sessions, cutoff_date, verbose=True):
+    """Keep only sessions with ``session_date <= cutoff_date`` (``YYYY-MM-DD``).
+
+    ``cutoff_date=None`` returns the frame unchanged. ``session_date`` is a normalised
+    ``YYYY-MM-DD`` string, so the comparison is a safe lexicographic one.
+    """
+    if cutoff_date is None:
+        return df_sessions
+    cutoff = pd.to_datetime(cutoff_date).strftime("%Y-%m-%d")
+    before = len(df_sessions)
+    out = df_sessions[df_sessions["session_date"] <= cutoff].copy()
+    if verbose:
+        print(f"  cutoff-date {cutoff}: kept {len(out)} of {before} sessions")
+    return out
+
+
+def _read_existing_session_table(output_path):
+    """Return the existing session table at ``output_path`` as a DataFrame, or None.
+
+    Used to bound an incremental session-table build: we only re-query docDB for
+    sessions on/after a recent window and upsert them into this existing table.
+    Returns None if the table doesn't exist yet (first build) or can't be read.
+    """
+    try:
+        if output_path.startswith("s3://"):
+            fs = s3fs.S3FileSystem(anon=False)
+            key = output_path[len("s3://"):]
+            if not fs.exists(key):
+                return None
+            with fs.open(key, "rb") as f:
+                return pq.read_table(f).to_pandas()
+        if not os.path.exists(output_path):
+            return None
+        return pq.read_table(output_path).to_pandas()
+    except (FileNotFoundError, OSError) as exc:
+        logger.warning("could not read existing session table %s: %s", output_path, exc)
+        return None
+
+
+def _incremental_window_start(existing_df, lookback_days):
+    """Return the ``YYYY-MM-DD`` window start for an incremental docDB delta query.
+
+    The window starts ``lookback_days`` before the latest ``session_date`` already in
+    ``existing_df`` — the lookback buffer re-scans recent days so sessions that landed
+    in docDB after the previous build (normal processing lag) are still picked up.
+    Returns None if ``existing_df`` is empty/dateless (caller falls back to a full query).
+    """
+    if existing_df is None or "session_date" not in existing_df.columns:
+        return None
+    dates = pd.to_datetime(existing_df["session_date"], errors="coerce").dropna()
+    if dates.empty:
+        return None
+    return (dates.max() - pd.Timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+
+
 def build_session_table(  # noqa: C901
     output_path=SESSION_TABLE_S3_URI,
     include_co_assets=True,
     co_discovery=None,
+    cutoff_date=None,
+    incremental=False,
+    lookback_days=30,
     verbose=True,
 ):
     """
@@ -518,6 +576,23 @@ def build_session_table(  # noqa: C901
     co_discovery : pd.DataFrame | None
         Optional pre-fetched get_dynamic_foraging_assets() result, to skip the
         ~137 s docDB query (handy for dev iteration / local caching). None -> fetch.
+    cutoff_date : str | None
+        Optional ``YYYY-MM-DD`` cutoff: keep only sessions with
+        ``session_date <= cutoff_date``, for a reproducible "as of <date>" build.
+        Applied before writing, so the session table and the trial/event tables
+        built from it are all bounded to the same set. None -> no cutoff.
+    incremental : bool
+        If True and a session table already exists at ``output_path``, only re-query
+        docDB for sessions in a recent window (``lookback_days`` before the latest
+        ``session_date`` already present) instead of the full ~19k-record universe,
+        then upsert that delta into the existing table. This avoids the ~137 s full
+        docDB query on every incremental build. Falls back to a full query when no
+        table exists yet (first build), or when ``include_co_assets`` is False.
+        Note the trade-off: a session whose ``session_date`` predates the window but
+        that is added/reprocessed in docDB later is only picked up by a full rebuild
+        (``incremental=False``); the lookback buffer covers the normal late-arrival.
+    lookback_days : int
+        Size of the incremental re-scan window (default 30); see ``incremental``.
     verbose : bool
 
     Returns:
@@ -546,6 +621,26 @@ def build_session_table(  # noqa: C901
     if verbose:
         print(f"  Loaded {len(df_han)} sessions from Han table")
 
+    # ---- 1b. Resolve an incremental docDB window (only when extending an existing table) ----
+    # When incremental and a session table already exists, we only re-query docDB for a
+    # recent window and upsert the delta — see _incremental_window_start. existing_older
+    # holds the rows we keep verbatim (session_date < window_start); window_start is the
+    # YYYY-MM-DD lower bound applied to both the docDB query and the Han slice.
+    existing_older = None
+    window_start = None
+    if incremental and include_co_assets and co_discovery is None:
+        existing_df = _read_existing_session_table(output_path)
+        window_start = _incremental_window_start(existing_df, lookback_days)
+        if window_start is not None:
+            existing_older = existing_df[existing_df["session_date"] < window_start].copy()
+            df_han = df_han[df_han["session_date"] >= window_start].copy()
+            if verbose:
+                print(
+                    f"Incremental session table: re-querying docDB for session_date >= "
+                    f"{window_start} (lookback {lookback_days}d); keeping "
+                    f"{len(existing_older)} older rows verbatim."
+                )
+
     # ---- 2. Union with the docDB / CO universe (or build Han-only) ----
     df_skipped = None
     if include_co_assets:
@@ -554,9 +649,19 @@ def build_session_table(  # noqa: C901
                 get_dynamic_foraging_assets,
             )
 
+            extra_filter = (
+                {"session.session_start_time": {"$gte": window_start}}
+                if window_start is not None
+                else None
+            )
             if verbose:
-                print("Querying docDB for the complete dynamic-foraging CO universe...")
-            co_discovery = get_dynamic_foraging_assets()
+                scope = (
+                    f"sessions on/after {window_start}"
+                    if window_start is not None
+                    else "the complete dynamic-foraging CO universe"
+                )
+                print(f"Querying docDB for {scope}...")
+            co_discovery = get_dynamic_foraging_assets(extra_filter=extra_filter)
         df_sessions, df_skipped = _merge_han_and_co(df_han, co_discovery, verbose=verbose)
     else:
         df_sessions = df_han.copy()
@@ -565,6 +670,18 @@ def build_session_table(  # noqa: C901
 
     # ---- 7. Assign preferred NWB data source per session (refresh on all rows) ----
     df_sessions["nwb_data_source"] = df_sessions.apply(_assign_nwb_data_source, axis=1)
+
+    # ---- 7a. Upsert the delta into the kept older rows (incremental builds only) ----
+    if existing_older is not None:
+        df_sessions = pd.concat([existing_older, df_sessions], ignore_index=True)
+        # Older rows and the just-built window are disjoint by date, but guard anyway:
+        # keep the freshly-built row on any _session_id collision.
+        df_sessions = df_sessions.drop_duplicates(subset="_session_id", keep="last").reset_index(
+            drop=True
+        )
+
+    # ---- 7b. Optional session-date cutoff (reproducible "as of <date>" build) ----
+    df_sessions = _apply_session_cutoff(df_sessions, cutoff_date, verbose=verbose)
 
     # ---- 8. Write to parquet ----
     if verbose:
@@ -1201,3 +1318,17 @@ def _read_json(path):
     else:
         with open(path, "r") as f:
             return json.load(f)
+
+
+def _write_text(text, path):
+    """Write a string to a local path or S3 URI."""
+    if path.startswith("s3://"):
+        fs = s3fs.S3FileSystem(anon=False)
+        with fs.open(path[len("s3://") :], "w") as f:
+            f.write(text)
+    else:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)

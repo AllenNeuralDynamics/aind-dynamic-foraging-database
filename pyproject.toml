@@ -21,8 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # Everything needed to BUILD/extend the database from NWBs. Depends on the NWB readers in
-# aind-dynamic-foraging-data-utils (nwb_utils, code_ocean_utils). Han's session table
-# (aind-analysis-arch-result-access) is CO-internal and installed separately when needed.
+# aind-dynamic-foraging-data-utils (nwb_utils, code_ocean_utils) and Han's session table
+# (aind-analysis-arch-result-access, providing han_pipeline.get_session_table).
 build = [
     "pynwb",
     "hdmf_zarr",
@@ -32,6 +32,7 @@ build = [
     "aind-data-access-api",
     "codeocean",
     "aind-dynamic-foraging-data-utils",
+    "aind-analysis-arch-result-access",
 ]
 dev = [
     "black",
@@ -48,10 +49,11 @@ dev = [
 aind-df-build = "aind_dynamic_foraging_database.build.build_cache:_cli"
 
 # Dev/CO only: pull the build's parent-side functions (get_dynamic_foraging_assets, ...) from the
-# han_DF_cache branch until they're released on PyPI (see the migration plan, "Track A").
+# feat/co-get-dynamic-foraging-assets branch (parent PR #147) until they're merged to main and
+# released on PyPI (see the migration plan, "Track A"). Repoint to a >= version once released.
 # Ignored by pip consumers and stripped from the published wheel metadata.
 [tool.uv.sources]
-aind-dynamic-foraging-data-utils = { git = "https://github.com/AllenNeuralDynamics/aind-dynamic-foraging-data-utils.git", branch = "han_DF_cache" }
+aind-dynamic-foraging-data-utils = { git = "https://github.com/AllenNeuralDynamics/aind-dynamic-foraging-data-utils.git", branch = "feat/co-get-dynamic-foraging-assets" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

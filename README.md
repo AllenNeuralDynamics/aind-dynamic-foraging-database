@@ -172,6 +172,56 @@ query, but reads every subject's footer — slow; scope to subjects whenever you
 
 ---
 
+## Snapshots (reproducible / pinned data sources)
+
+The database is updated **in place** (incrementally), so the latest read always reflects the most
+recent build. When you need a **frozen, reproducible** data source — e.g. to fix the training data
+for a model run — read from a dated **snapshot** instead: an immutable copy of the whole database
+(all tables + logs) under `…/snapshots/<YYYYMMDD>/`.
+
+Pin a snapshot globally (all subsequent reads use it), or per call:
+
+```python
+import aind_dynamic_foraging_database as db
+
+db.use_snapshot("20260604")          # all reads now hit snapshots/20260604/
+sel = db.select_sessions("foraging_eff > 0.8")
+trials = db.fetch_trials(sel)        # from the snapshot
+db.use_snapshot(None)                # back to the latest (live) database
+
+# or override for a single call (ignored if you pass an explicit base=):
+sel = db.select_sessions("foraging_eff > 0.8", snapshot="20260604")
+```
+
+`db.current_snapshot()` returns the pinned id (or `None` for latest). Passing `snapshot=None` to a
+helper forces latest even when a global snapshot is set.
+
+**Creating a snapshot** (maintainers; needs the `[build]` extra + S3 write credentials) is a
+server-side copy — no download:
+
+```python
+from aind_dynamic_foraging_database.build import update_database, create_snapshot
+
+update_database(n_workers=64)        # optional: incremental update from all sources first
+create_snapshot("20260604")          # freeze the current state (defaults to today, UTC)
+```
+
+### Provenance & build history
+
+Each build records its own provenance under the database prefix, so every snapshot carries it too:
+
+- **`build_history.json`** — append-only ledger, one entry per build/append run: `build_id`
+  (UTC timestamp), start/finish, duration, status, `code_version`, processed/skipped/failed counts,
+  and source/reader breakdowns.
+- **`logs/<build_id>.log`** — the raw console + warning log of that run (per-session triage, failures).
+- **`processing_log.csv`** / **`build_metadata.json`** — per-session triage state and the incremental
+  processed-set.
+- **`snapshot_manifest.json`** (written into each snapshot) — `snapshot_date`, `created_at_utc`,
+  `source_prefix`, `latest_build_id`, `n_sessions`: what the snapshot is, when it was cut, and which
+  build produced it.
+
+---
+
 ## Native SQL (what the helpers are built on)
 
 The table paths are importable:
@@ -183,6 +233,19 @@ from aind_dynamic_foraging_database import SESSION_DB, TRIAL_DB, EVENT_DB
 Everything below is the raw DuckDB layer. Use it directly when you want full control — or to
 understand what the helpers do under the hood. (You can still read the session table directly,
 e.g. `duckdb.sql(f"SELECT COUNT(*) FROM read_parquet('{SESSION_DB}') WHERE subject_id = '754372'")`.)
+
+> **Reading a [snapshot](#snapshots-reproducible--pinned-data-sources) from raw SQL?** The
+> `SESSION_DB` / `TRIAL_DB` / `EVENT_DB` constants are fixed to the **latest** database and do **not**
+> honour `use_snapshot()`. Use the snapshot-aware accessors `session_db()` / `trial_db()` /
+> `event_db()` instead — they return the resolved path (latest, the pinned snapshot, or a per-call
+> `snapshot="20260604"`):
+>
+> ```python
+> from aind_dynamic_foraging_database import use_snapshot, trial_db
+> use_snapshot("20260604")
+> duckdb.sql(f"SELECT * FROM read_parquet('{trial_db()}/**/*.parquet', "
+>            f"hive_partitioning=true, union_by_name=true) WHERE subject_id = '754372'")
+> ```
 
 ### The three read options (always use these on the partitioned tables)
 
