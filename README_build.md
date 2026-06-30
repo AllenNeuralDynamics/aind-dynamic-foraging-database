@@ -159,6 +159,14 @@ After the parallel per-session writes, each subject's files are merged into one 
   CO-asset reads are **I/O-bound** (S3 zarr), so going past the core count overlaps S3 latency:
   on a 16-core box **64 workers ≈ 4×** faster than default; beyond ~64 there's no gain (the
   `create_df_trials` parse saturates the cores). RAM is not the limit (~21 GB at 128 workers).
+- **Worker ceiling = the AWS credential endpoint, not the CPUs.** Each worker process
+  independently resolves the Code Ocean task-role credentials from the container metadata
+  endpoint (`169.254.170.2`). Too many workers stampede it: on a **64-CPU** box, **256 workers
+  fails** the whole build with mass `CredentialRetrievalError` (read-timeouts / 403 from the
+  metadata endpoint) — thousands of sessions dropped. This is **not** an IAM permission problem
+  (that surfaces as S3 `AccessDenied`, not a credential-*retrieval* timeout). **128 workers
+  succeeds** with zero credential errors. **Rule of thumb: cap at ~128 workers** (≈2× cores);
+  if `CredentialRetrievalError`s still appear, drop lower.
 - **docDB enrichment stays at 20 threads** — docDB 503s under higher concurrency, and it isn't
   the bottleneck.
 
@@ -185,7 +193,7 @@ Queries then use `union_by_name=true` to merge any remaining per-reader column d
 | Flag | Default | Meaning |
 |---|---|---|
 | `--out-dir` | local scratch | output dir or `s3://…` prefix (prod = `s3://aind-scratch-data/aind-dynamic-foraging-cache`) |
-| `--n-workers` | `CO_CPUS-1` | worker processes; **~64 recommended** for the I/O-bound CO reads |
+| `--n-workers` | `CO_CPUS-1` | worker processes; **~64 recommended**, **cap ~128** for the I/O-bound CO reads (above that the AWS credential endpoint `169.254.170.2` stampedes → `CredentialRetrievalError`; 256 fails on a 64-CPU box, 128 is safe) |
 | `--limit N` | all | build only a random N-session subset (quick test) |
 | `--full-rebuild` | off | ignore `build_metadata.json` and reprocess every session |
 | `--no-coalesce` | off | keep one parquet file per session instead of per subject |
@@ -200,6 +208,9 @@ Incremental by default: re-running only processes sessions not already in `build
 - **Build (full, 64 workers):** ~1 h, dominated by ~15k CO-asset S3 reads; incremental
   re-runs only touch new/unprocessed sessions (cheap). docDB discovery ≈ 137 s (cache it for
   dev with `--co-cache`).
+- **Build (full, 128 workers, 64-CPU box):** **~49 min** for 23.9k sessions
+  (`--full-rebuild --cutoff-date 2026-06-03`) — 128 is the safe max (see §7: 256 stampedes the
+  credential endpoint and fails).
 
 (For read/query performance, see [`README.md`](README.md).)
 
