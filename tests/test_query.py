@@ -193,10 +193,26 @@ class TestSnapshots(unittest.TestCase):
             # a pre-existing snapshots/ dir must NOT be copied into the new snapshot
             os.makedirs(os.path.join(cache_dir, "snapshots", "old"))
 
+            # build provenance files that the snapshot should freeze + summarize in its manifest
+            import json
+            with open(os.path.join(cache_dir, "build_history.json"), "w") as f:
+                json.dump([{"build_id": "20260604T101530Z", "n_processed": 3}], f)
+            with open(os.path.join(cache_dir, "build_metadata.json"), "w") as f:
+                json.dump({"n_processed": 3}, f)
+
             snap = create_snapshot("20260604", prefix=cache_dir)
             self.assertEqual(snap, os.path.join(cache_dir, "snapshots", "20260604"))
-            self.assertEqual(sorted(os.listdir(snap)),
-                             ["event_table", "session_table.parquet", "trial_table"])
+            self.assertEqual(
+                sorted(os.listdir(snap)),
+                ["build_history.json", "build_metadata.json", "event_table",
+                 "session_table.parquet", "snapshot_manifest.json", "trial_table"])
+            # manifest captures provenance from the copied build files
+            manifest = json.load(open(os.path.join(snap, "snapshot_manifest.json")))
+            self.assertEqual(manifest["snapshot_date"], "20260604")
+            self.assertEqual(manifest["latest_build_id"], "20260604T101530Z")
+            self.assertEqual(manifest["n_sessions"], 3)
+            self.assertEqual(manifest["source_prefix"], cache_dir)
+            self.assertIn("created_at_utc", manifest)
 
             # latest (live) read
             latest = query.select_sessions("foraging_eff > 0", base=session_path)

@@ -17,6 +17,7 @@ Creating a snapshot writes to S3, so it needs the ``[build]`` extra (``s3fs``) a
 credentials for the bucket. The copy is **server-side** (S3 CopyObject — no download).
 """
 
+import json
 import os
 import shutil
 from datetime import datetime, timezone
@@ -70,7 +71,58 @@ def create_snapshot(date=None, prefix=PROD_S3_PREFIX, *, overwrite=False) -> str
         _create_snapshot_s3(prefix, dest, overwrite)
     else:
         _create_snapshot_local(prefix, dest, overwrite)
+    _write_snapshot_manifest(prefix, dest, date)
     return dest
+
+
+def _write_snapshot_manifest(source_prefix: str, dest: str, date: str) -> None:
+    """Write ``snapshot_manifest.json`` into ``dest`` recording the snapshot's provenance.
+
+    Reads the (just-copied) ``build_history.json`` / ``build_metadata.json`` to record the
+    latest build id and session count; both are best-effort (``None`` if absent).
+    """
+    history = _read_json_or_none(f"{dest}/build_history.json")
+    latest_build_id = history[-1].get("build_id") if isinstance(history, list) and history else None
+    meta = _read_json_or_none(f"{dest}/build_metadata.json")
+    manifest = {
+        "snapshot_date": date,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source_prefix": source_prefix,
+        "latest_build_id": latest_build_id,
+        "n_sessions": meta.get("n_processed") if isinstance(meta, dict) else None,
+    }
+    _write_json(manifest, f"{dest}/snapshot_manifest.json")
+
+
+def _read_json_or_none(path: str):
+    """Read a JSON file at a local path or ``s3://`` URI; return ``None`` if it doesn't exist."""
+    if path.startswith("s3://"):  # pragma: no cover
+        import s3fs
+
+        fs = s3fs.S3FileSystem(anon=False)
+        key = path[len("s3://"):]
+        if not fs.exists(key):
+            return None
+        with fs.open(key, "r") as f:
+            return json.load(f)
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
+
+
+def _write_json(obj, path: str) -> None:
+    """Write ``obj`` as indented JSON to a local path or ``s3://`` URI."""
+    text = json.dumps(obj, indent=2)
+    if path.startswith("s3://"):  # pragma: no cover
+        import s3fs
+
+        fs = s3fs.S3FileSystem(anon=False)
+        with fs.open(path[len("s3://"):], "w") as f:
+            f.write(text)
+    else:
+        with open(path, "w") as f:
+            f.write(text)
 
 
 def _create_snapshot_s3(prefix: str, dest: str, overwrite: bool) -> None:  # pragma: no cover
