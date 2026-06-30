@@ -268,5 +268,41 @@ class TestCutoffDate(unittest.TestCase):
         self.assertIsNone(build_cache.parse_args([]).cutoff_date)
 
 
+class TestValidateRebuild(unittest.TestCase):
+    """Two-build comparison: the digest-merge core and an end-to-end identical-build run."""
+
+    def test_compare_digests(self):
+        """_compare_digests flags row-count, checksum, and one-sided session differences."""
+        from aind_dynamic_foraging_database.build.validate import validate_rebuild as vr
+        old = pd.DataFrame({"session_id": ["a", "b", "c", "d"],
+                            "n": [10, 10, 10, 10], "checksum": [1, 2, 3, 4]})
+        new = pd.DataFrame({"session_id": ["a", "b", "c", "e"],
+                            "n": [10, 11, 10, 10], "checksum": [1, 2, 99, 5]})
+        res = vr._compare_digests(old, new)
+        self.assertEqual(res["n_match"], 1)            # only 'a' fully matches
+        reasons = dict(zip(res["mismatches"]["session_id"], res["mismatches"]["reason"]))
+        self.assertEqual(reasons["b"], "row_count")
+        self.assertEqual(reasons["c"], "checksum")
+        self.assertEqual(reasons["d"], "missing_in_new")
+        self.assertEqual(reasons["e"], "missing_in_old")
+
+    def test_validate_identical_builds(self):
+        """validate_builds reports zero mismatches for two identical local builds."""
+        from aind_dynamic_foraging_database.build.validate import validate_rebuild as vr
+        with tempfile.TemporaryDirectory() as tmp:
+            old, new = os.path.join(tmp, "old"), os.path.join(tmp, "new")
+            os.makedirs(old)
+            os.makedirs(new)
+            _build_local_cache(old)
+            _build_local_cache(new)
+            report = vr.validate_builds(old, new, cutoff_date="2099-01-01", verbose=False)
+            self.assertGreater(report["n_shared"], 0)
+            self.assertEqual(report["only_in_old"], [])
+            self.assertEqual(report["only_in_new"], [])
+            self.assertEqual(report["trial"]["n_mismatch"], 0)
+            self.assertEqual(report["event"]["n_mismatch"], 0)
+            self.assertEqual(report["trial"]["n_match"], report["n_shared"])
+
+
 if __name__ == "__main__":
     unittest.main()
