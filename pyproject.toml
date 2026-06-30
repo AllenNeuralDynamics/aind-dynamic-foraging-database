@@ -21,8 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # Everything needed to BUILD/extend the database from NWBs. Depends on the NWB readers in
-# aind-dynamic-foraging-data-utils (nwb_utils, code_ocean_utils). Han's session table
-# (aind-analysis-arch-result-access) is CO-internal and installed separately when needed.
+# aind-dynamic-foraging-data-utils (nwb_utils, code_ocean_utils) and Han's session table
+# (aind-analysis-arch-result-access, providing han_pipeline.get_session_table).
 build = [
     "pynwb",
     "hdmf_zarr",
@@ -32,6 +32,7 @@ build = [
     "aind-data-access-api",
     "codeocean",
     "aind-dynamic-foraging-data-utils",
+    "aind-analysis-arch-result-access",
 ]
 dev = [
     "black",

@@ -24,8 +24,8 @@ they're released on PyPI):
 uv sync --extra build
 ```
 
-Building the **session table** additionally needs Han's pipeline package
-(`aind-analysis-arch-result-access`, AIND-internal), installed separately.
+The `build` extra includes Han's pipeline package (`aind-analysis-arch-result-access`,
+which provides `han_pipeline.get_session_table` for the session table).
 
 ---
 
