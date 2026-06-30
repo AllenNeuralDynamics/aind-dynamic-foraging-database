@@ -71,6 +71,7 @@ class Config:
     coalesce: bool = True  # merge each subject's sessions into one parquet file
     co_cache: Optional[str] = None  # dev: cache the docDB discovery (pickle) here
     cutoff_date: Optional[str] = None  # YYYY-MM-DD: only sessions on/before this date
+    lookback_days: int = 30  # incremental docDB re-scan window (see build_session_table)
 
     @property
     def is_s3(self) -> bool:
@@ -125,6 +126,10 @@ def build_sessions(cfg: Config):
     See parquet_builder.build_session_table / _merge_han_and_co for the match
     rule. The ~137 s docDB discovery can be cached locally for dev iteration via
     --co-cache (loaded if present, else fetched once and saved).
+
+    Incremental by default (unless --full-rebuild): when a session_table.parquet
+    already exists, only the recent --lookback-days window is re-queried from docDB
+    and upserted, avoiding the full ~137 s discovery on every incremental build.
     """
     _banner("Building session table (Han ∪ docDB CO universe)")
     return parquet_builder.build_session_table(
@@ -132,6 +137,8 @@ def build_sessions(cfg: Config):
         include_co_assets=True,
         co_discovery=_load_or_fetch_co_discovery(cfg),
         cutoff_date=cfg.cutoff_date,
+        incremental=not cfg.full_rebuild,
+        lookback_days=cfg.lookback_days,
         verbose=True,
     )
 
@@ -383,6 +390,7 @@ def _record_build(cfg, build_id, started, finished, summary, status, error, log_
         "git_commit": _git_commit(),
         "out_dir": cfg.out_dir,
         "incremental": not cfg.full_rebuild,
+        "lookback_days": cfg.lookback_days,
         "limit": cfg.limit,
         "cutoff_date": cfg.cutoff_date,
         "n_workers": cfg.n_workers,
@@ -451,6 +459,11 @@ def parse_args(argv=None) -> Config:
     p.add_argument("--cutoff-date", default=None,
                    help="YYYY-MM-DD: build only sessions on/before this date, for a "
                         "reproducible 'as of <date>' build (default: all sessions)")
+    p.add_argument("--lookback-days", type=int, default=30,
+                   help="incremental docDB re-scan window: on an incremental build the "
+                        "full ~19k-record docDB query is replaced by a query for sessions "
+                        "in the last N days before the latest session already built, then "
+                        "upserted (default: 30). Ignored with --full-rebuild.")
     args = p.parse_args(argv)
     return Config(
         out_dir=args.out_dir,
@@ -460,6 +473,7 @@ def parse_args(argv=None) -> Config:
         coalesce=not args.no_coalesce,
         co_cache=args.co_cache,
         cutoff_date=args.cutoff_date,
+        lookback_days=args.lookback_days,
     )
 
 

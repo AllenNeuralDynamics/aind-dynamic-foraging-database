@@ -113,6 +113,14 @@ We union them so the database is complete and keeps working after Han's pipeline
   dropping other-pipeline derived assets (PoseTracking, opto-sorting, …).
 - Uses **server-side pagination** (`paginate=True, paginate_batch_size=5000`) — the result
   is ~19k records and a single unpaginated query is unreliable.
+- **Incremental by default** (unless `--full-rebuild`): when a `session_table.parquet`
+  already exists, the full ~19k-record / ~137 s query is replaced by a server-side
+  date-filtered query (`session.session_start_time >= window_start`, via the
+  `extra_filter` arg) for sessions in the last `--lookback-days` (default 30) before the
+  latest session already built. That delta is merged and **upserted** into the existing
+  table; rows older than the window are kept verbatim. Trade-off: a session whose
+  `session_date` predates the window but is added/reprocessed in docDB later is only
+  picked up by a `--full-rebuild`; the lookback buffer covers the normal late-arrival.
 
 ### 3. Han ⇄ CO match rule (`_merge_han_and_co`, see [issue #146](https://github.com/AllenNeuralDynamics/aind-dynamic-foraging-data-utils/issues/146))
 Han is **≤ 1 session per `(subject, date)`** — its `add_session_number()` keeps only the
@@ -195,11 +203,14 @@ Queries then use `union_by_name=true` to merge any remaining per-reader column d
 | `--out-dir` | local scratch | output dir or `s3://…` prefix (prod = `s3://aind-scratch-data/aind-dynamic-foraging-cache`) |
 | `--n-workers` | `CO_CPUS-1` | worker processes; **~64 recommended**, **cap ~128** for the I/O-bound CO reads (above that the AWS credential endpoint `169.254.170.2` stampedes → `CredentialRetrievalError`; 256 fails on a 64-CPU box, 128 is safe) |
 | `--limit N` | all | build only a random N-session subset (quick test) |
-| `--full-rebuild` | off | ignore `build_metadata.json` and reprocess every session |
+| `--full-rebuild` | off | ignore `build_metadata.json` **and** re-query the full docDB universe; reprocess every session |
 | `--no-coalesce` | off | keep one parquet file per session instead of per subject |
 | `--co-cache PATH` | — | dev: cache the ~137 s docDB discovery (pickle) (load if present, else fetch+save) |
+| `--lookback-days N` | `30` | incremental docDB re-scan window: query only sessions in the last N days before the latest session already built, then upsert (ignored with `--full-rebuild`) |
 
-Incremental by default: re-running only processes sessions not already in `build_metadata.json`.
+Incremental by default, on two levels: the **session table** only re-queries docDB for the
+recent `--lookback-days` window and upserts (see §2 above), and the **trial/event** build only
+processes sessions not already in `build_metadata.json`.
 
 ---
 
