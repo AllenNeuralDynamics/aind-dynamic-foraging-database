@@ -103,9 +103,13 @@ def _coalesce_subject(output_prefix, subject_id, sort_cols):
     if not session_files:
         return  # nothing new to merge (already coalesced)
 
-    new_df = pd.concat([fs.read_parquet(e) for e in session_files], ignore_index=True)
+    # Merge per-session files with DuckDB union_by_name (the same engine/semantics as the
+    # query path), which resolves cross-session dtype conflicts by promoting to a common
+    # type. pd.concat hard-fails on these (e.g. delay_start_time str 'none' vs double), which
+    # silently left subjects un-coalesced.
+    new_df = fs.read_union(session_files)
     if coalesced in entries:
-        old_df = fs.read_parquet(coalesced)
+        old_df = fs.read_union([coalesced])
         old_df = old_df[~old_df["session_id"].isin(set(new_df["session_id"]))]
         combined = pd.concat([old_df, new_df], ignore_index=True)
     else:
@@ -152,6 +156,24 @@ class _PartitionFS:
             with self._fs.open(f"{self.base}/{name}", "rb") as f:
                 return pd.read_parquet(f)
         return pd.read_parquet(os.path.join(self.base, name))
+
+    def read_union(self, names):
+        """Read+merge parquet files with DuckDB ``union_by_name`` (promotes dtype conflicts).
+
+        Unlike ``pd.concat`` + pyarrow, this never hard-fails on cross-session type conflicts
+        (it widens to a common type, e.g. str+double -> VARCHAR), matching the query path.
+        """
+        import duckdb
+
+        con = duckdb.connect()
+        if self.is_s3:
+            con.execute("INSTALL httpfs; LOAD httpfs; SET s3_region='us-west-2';")
+            con.execute("CREATE SECRET (TYPE S3, PROVIDER credential_chain);")
+            paths = [f"s3://{self.base}/{n}" for n in names]
+        else:
+            paths = [os.path.join(self.base, n) for n in names]
+        lst = "[" + ", ".join("'" + p + "'" for p in paths) + "]"
+        return con.execute(f"SELECT * FROM read_parquet({lst}, union_by_name=true)").df()
 
     def write_parquet(self, df, name):
         """Write a DataFrame to one parquet file in the partition."""
