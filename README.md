@@ -172,6 +172,42 @@ query, but reads every subject's footer — slow; scope to subjects whenever you
 
 ---
 
+## Snapshots (reproducible / pinned data sources)
+
+The database is updated **in place** (incrementally), so the latest read always reflects the most
+recent build. When you need a **frozen, reproducible** data source — e.g. to fix the training data
+for a model run — read from a dated **snapshot** instead: an immutable copy of the whole database
+(all tables + logs) under `…/snapshots/<YYYYMMDD>/`.
+
+Pin a snapshot globally (all subsequent reads use it), or per call:
+
+```python
+import aind_dynamic_foraging_database as db
+
+db.use_snapshot("20260604")          # all reads now hit snapshots/20260604/
+sel = db.select_sessions("foraging_eff > 0.8")
+trials = db.fetch_trials(sel)        # from the snapshot
+db.use_snapshot(None)                # back to the latest (live) database
+
+# or override for a single call (ignored if you pass an explicit base=):
+sel = db.select_sessions("foraging_eff > 0.8", snapshot="20260604")
+```
+
+`db.current_snapshot()` returns the pinned id (or `None` for latest). Passing `snapshot=None` to a
+helper forces latest even when a global snapshot is set.
+
+**Creating a snapshot** (maintainers; needs the `[build]` extra + S3 write credentials) is a
+server-side copy — no download:
+
+```python
+from aind_dynamic_foraging_database.build import update_database, create_snapshot
+
+update_database(n_workers=64)        # optional: incremental update from all sources first
+create_snapshot("20260604")          # freeze the current state (defaults to today, UTC)
+```
+
+---
+
 ## Native SQL (what the helpers are built on)
 
 The table paths are importable:
